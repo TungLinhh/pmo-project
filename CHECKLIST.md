@@ -179,3 +179,85 @@ npm run build
 - 9/9 bugs fixed và E2E verified
 - Build size: 363KB JS, 101KB gzip
 - Backend ổn định ở port 3000
+
+
+## Update 2026-08-30 (vòng 4: GitHub + Docker + UI fixes)
+
+| # | Mục | Status | Ghi chú |
+|---|---|---|---|
+| 1 | GitHub push code | ✅ DONE | Repo: `TungLinhh/pmo-project`, commit 6091f50 |
+| 2 | Dockerfile multi-stage | ✅ DONE | Test build syntax OK, docker chưa cài trong WSL |
+| 3 | shop_drawing.js 27 vs 28 args | ✅ FIXED | Thêm 1 param resubmit_actual_date_2 |
+| 4 | Upload Excel modal (browser test) | ✅ OK | Modal render, file input + Upload button OK |
+| 5 | Approval Reject (browser test) | ✅ OK | POST /api/shop-drawings/:id/transition + toast |
+| 5b | Approval View Details (browser test) | ✅ OK | Modal hiển thị JSON đầy đủ |
+| 6 | Dark mode WCAG AA | ✅ FIXED | Text #d8dee9 (4.5:1 contrast), input/select border rõ |
+| 7 | Table compact | ✅ FIXED | padding 5x8, tabular-nums, th nowrap |
+| 8 | Cursor-tracking tooltip | ✅ FIXED | PieChart dùng mousemove, có animation fade |
+| 9 | Manpower page thật | ✅ FIXED | 4 tab (Workers/Machinery/Teams/Suppliers) với data |
+| 10 | Mở rộng test data | ✅ DONE | shop=50, schedule=100, materials=80, 2 file lỗi |
+| 11 | Backup safety | ✅ DONE | pmo.db.backup-20260830-000409 (475KB) |
+| 12 | Admin/CEO test | ✅ 114/114 | 38 endpoints × 3 projects × admin/CEO |
+
+### Số liệu TEST-MASTER-01 project_id=3 (sau upload)
+- shop_drawings: 51 (TST-A zone)
+- construction_schedule_items: 100 (TST-B zone)
+- materials: 80 (TST-C zone)
+- subcontractors: 50 (tenant-level)
+- suppliers: 30 (tenant-level)
+- daily_reports: 1 (TEST 1.8.2026)
+- rfa_log: 20 (TST-A/B/C/D)
+- business_process_steps: 8 (project_execution)
+- file_uploads: 11 (9 success, 2 intentional FAILED)
+
+### Screenshots
+Đã chụp vào `docs/bug_screenshots/`:
+- upload-excel-01-control-center.png, 02-modal-open.png
+- approval-01-approval-page.png, 02-view-detail-modal.png, 03-reject-modal.png
+- dark-mode-01-light.png, 02-dark.png
+- manpower-01-manpower.png
+- verify-upload-modal-open.png, verify-upload-file-selected.png, verify-upload-after-submit.png
+- verify-approval-view-modal.png, verify-approval-reject-modal.png, verify-approval-reject-filled.png
+- verify-approval-reject-after.png
+
+### Files mới
+- `Dockerfile`, `docker-entrypoint.sh`, `.dockerignore`
+- `frontend/src/components/CursorTooltip.jsx`
+- `frontend/src/hq/Manpower.jsx` (real page, 4 tab)
+- `scripts/ui-verify.mjs`, `scripts/ui-verify-deep.mjs` (Playwright UI test)
+- `backend/scripts/init-schema.mjs`
+
+### Known issues (chưa fix - low priority)
+- 1 daily report có thể ingest nhưng sub-row chưa verify đếm từng loại (work_items/manpower/materials/acceptance)
+- 2 file lỗi cố ý trong test fixtures (TĐ XYZ-BAD zone invalid, Shop EMPTY no data) - đây là tính năng test
+- Reference sheets (547MB PDF gốc) không commit, dùng nội bộ
+
+
+## Update 2026-08-30 vòng 5 (rate limit + backup verify + docker + daily report + README + data)
+
+| # | Mục | Status | Ghi chú |
+|---|---|---|---|
+| 1 | Rate limit (express-rate-limit) | ✅ DONE | Login 5/min (skipSuccessfulRequests), API 100/min |
+| 2 | Backup verify (pg_dump → pmo_backup_verify) | ✅ DONE | 44/44 bảng khớp 100%, 1120 rows match. File: `docs/backup_verification/backup_verification.md` |
+| 3 | Docker build test | ⚠️ GIỚI HẠN | Không có Docker trong WSL (no sudo). Hướng dẫn trong `docs/docker_build_test_report.md` |
+| 4 | Daily report sub-row verify | ✅ DONE + FIX | R27-R37 range + filter "Tổng cộng". 8 work_items/sheet (3 parents + 5 subs) khớp file gốc. Report: `docs/daily_report_verification.md` |
+| 5 | README.md GitHub | ✅ DONE | 7 KB, đầy đủ quickstart + demo accounts + structure |
+| 6 | Data TEST-MASTER-01 expansion | ✅ DONE | +contracts(12) +invoices(30) +payment_requests(31) +submittals(20) +issues(17) +notifications(63) +directives(9) +audit_log(131) +KPI(4) +file_uploads(5) |
+
+### Test results
+- **Rate limit**: 5 fail → 401, 6th → 429, success login không bị count (skipSuccessfulRequests ✓), 110 API calls: 90 OK + 20 limited
+- **Backup verify**: 44 tables, 1120 rows khớp 100%, drop & recreate DB OK
+- **Daily report**: HBG C20 file 2 sheets, 8 work_items + 16 manpower + 1 material + 11 acceptance per sheet
+- **Pipeline test**: 9/11 file OK (2 intentional fail)
+
+### Files mới/sửa vòng 5
+- `backend/src/index.js` (+rate-limit imports + middlewares)
+- `backend/package.json` (+express-rate-limit)
+- `backend/src/services/ingest/daily_report.js` (R27-R37 + "Tổng cộng" filter)
+- `backend/scripts/seed-test-master-business.mjs` (mới, 230 dòng)
+- `docs/backup_verification/backup_verification.md`
+- `docs/backup_verification/backup_test_20260830-004948.sql` (289KB)
+- `docs/backup_verification/backup_test_20260830-004948.sql.dump` (171KB)
+- `docs/daily_report_verification.md`
+- `docs/docker_build_test_report.md`
+- `README.md` (7KB, GitHub-ready)

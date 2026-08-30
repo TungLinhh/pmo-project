@@ -2,6 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
+import rateLimit from 'express-rate-limit';
 import { saveFile, getFilePath, fileExists } from './lib/storage.js';
 import { detectDocType, listSheets } from './lib/excel.js';
 import { getDb, closeDb } from './db/index.js';
@@ -15,6 +16,32 @@ app.use(cors());
 app.use(express.json());
 import { authMiddleware } from './lib/auth.js';
 app.use(authMiddleware);
+
+// ============ Rate Limiting ============
+// Login: chặt - 5 requests / phút / IP (chống brute force)
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,  // 1 phút
+  max: 5,
+  standardHeaders: true,  // RateLimit-* headers
+  legacyHeaders: false,
+  message: { error: 'Quá nhiều lần đăng nhập sai. Vui lòng đợi 1 phút rồi thử lại.' },
+  statusCode: 429,
+  skipSuccessfulRequests: true,  // chỉ đếm request fail, không chặn user thật
+});
+
+// API chung: vừa - 100 requests / phút / IP
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Quá nhiều request. Vui lòng giảm tần suất.' },
+  statusCode: 429,
+});
+
+// Apply: login limiter chỉ cho POST /api/auth/login
+// API limiter áp dụng cho tất cả /api/* (trừ login - sẽ áp riêng trước)
+app.use('/api/', apiLimiter);
 
 // Multer config: preserve UTF-8 filenames
 const storage = multer.memoryStorage();
@@ -337,7 +364,7 @@ app.get('/api/health', (req, res) => {
 
 import { login as loginFn, logout as logoutFn, listUsers } from './lib/auth.js';
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   if (!req.body.email) {
     return res.json({
       message: 'Send POST {email, password}',

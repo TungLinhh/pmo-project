@@ -89,16 +89,19 @@ async function ingestOneSheet(db, projectId, sheetName, reportDate, rows) {
 
   let ok = 0, errors = 0;
 
-  // ========= Section I: Work items (rows 29-37) =========
+  // ========= Section I: Work items (rows 27-37) =========
   // Cols: C1=TT, C2=system, C3=blocker, C8=sub-TT, C9=sub-name, C11=rate, C12=start, C15=progress
+  // Row 27 (0-idx) là section header + first parent (e.g. "1. KHO VÀ VĂN PHÒNG")
+  // Rows 28-37 chứa các parent kế tiếp + sub-items
   const workItems = [];
   let currentParent = null;
-  for (let r = 28; r <= 37; r++) {  // 0-indexed
+  for (let r = 27; r <= 37; r++) {  // 0-indexed, includes R27 for first parent
     const row = rows[r] || [];
     const tt = toInt(row[0]);
     const name = toText(row[1]);
     const blocker = toText(row[2]);
-    if (tt && name) {
+    // Skip "Tổng cộng" / "Total" rows (no real ordinal)
+    if (tt && name && !/Tổng cộng|^Total$/i.test(name)) {
       // Parent item (level 1)
       currentParent = { parent_id: null, ordinal: tt, name_vi: name, blocker_notes: blocker, system_type: null, manpower_rate: null, start_date: null, finish_date: null, lost_days: null, progress_pct: null };
       workItems.push(currentParent);

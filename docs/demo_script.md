@@ -148,3 +148,32 @@ node src/index.js
 | `Cmd+R` / `F5` | Reload page |
 | `F12` | Open DevTools (check Network tab) |
 | `Cmd+Shift+R` | Hard reload (clear cache) |
+
+
+---
+
+## Update 2026-08-30 (vòng 4: GitHub + Docker + UI fixes)
+
+### Tài liệu sống - đã cập nhật cho khớp hiện trạng
+
+**Thay đổi chính từ vòng này:**
+- ✅ **Login** vẫn 7 demo accounts, đã verified browser test
+- ✅ **Upload Excel** modal work end-to-end (file picker + upload + ingest pipeline 9/11 OK)
+- ✅ **Approval Center** - View Details + Reject đều verified click thật + screenshot
+- ✅ **Dark mode** đạt WCAG AA contrast (text #d8dee9, không loá)
+- ✅ **Manpower & Machinery** có 4 tab thật (Workers/Machinery/Teams/Suppliers) - không còn TODO
+- ✅ **Cursor tooltip** trên pie chart bám theo chuột (mousemove)
+- ✅ **Table compact** padding 5x8, tabular-nums
+
+**Test data mới:**
+- TEST-MASTER-01 project (id=3) với 4 zones (TST-A/B/C/D)
+- Generated fixtures: 50 shop + 100 schedule + 80 materials + 50 subs + 30 suppliers + 20 RFA + 8 BP
+- 2 file cố ý lỗi: TĐ XYZ-BAD (zone invalid), Shop EMPTY (no data) - để test validation
+
+**Screenshots:** `docs/bug_screenshots/` có 18 ảnh trước/sau cho từng bug UI
+
+**GitHub:** Repo `TungLinhh/pmo-project` - commit 6091f50
+
+**Docker:** Multi-stage Dockerfile + docker-entrypoint.sh sẵn sàng (chưa test build vì docker chưa cài trong WSL)
+
+**Permission test:** 114/114 PASS (admin/CEO × 38 endpoint × 3 project)
