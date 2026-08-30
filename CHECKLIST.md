@@ -293,3 +293,28 @@ npm run build
 - v6-mobile-{01,02,03,04}-*.png (mobile nav)
 - v6-tooltip-pie{1,2,3,4}.png (tooltip verify)
 - dark-mode-audit/{login, control-center, projects, progress, shop, materials, manpower, payment, issues, notifications, master-data, approval, audit}.png (13 dark mode pages)
+
+## Update 2026-08-30 vòng 8 (ingest fixes + zone aliases + multi-zone)
+
+| # | Mục | Status | Ghi chú |
+|---|-----|--------|---------|
+| 1 | Test ingest 29 zone files từ HBG-HBC-BCTT gốc | ✅ | 29/29 SUCCESS (8 files failed trước fix) |
+| 2 | Fix zone_matcher: dùng findZoneByName thay hard-coded regex | ✅ | Aliases: CUL, BEACH ZONE, FITNES, LOBY → CLU/BZONE/GEN/LOB-SPA |
+| 3 | Fix detectDocType: payment_progress check trước "tiến độ" | ✅ | "Tiến độ thanh toán" giờ detect đúng |
+| 4 | Multi-zone rollup files: route to ingestProjectLevelFile | ✅ | 80 rows ingested từ 16 zones |
+| 5 | Fix project_level.js: detect ordinal bằng Roman numerals, skip numeric-only names | ✅ | Trước: chỉ insert 2 rows do `name="0.25"` |
+| 6 | gitignore backend/uploads/ | ✅ | Cleanup test artifacts |
+| 7 | 2 commits pushed lên GitHub | ✅ | `4e817d3` (ingest) + `26872ac` (UI fixes) |
+
+### Test results
+- **Trước fix**: 21/29 zone files SUCCESS, 8 FAILED
+- **Sau fix**: 29/29 SUCCESS
+- **Multi-zone rollup "Tiến độ thi công tổng thể"**:
+  - Trước: 2 rows (do bug parse cột)
+  - Sau: 80 rows / 16 zones (5 rows/zone) ✅
+
+### 3 multi-zone files status
+- `Tiến độ thi công tổng thể các khu vực.xlsx`: 16 sheets, 80 rows OK ✅
+- `Tiến độ vật tư tổng thể các khu vực.xlsx`: 1 sheet "Sơ đồ tổng thể vật tư" - placeholder, 0 rows
+- `Tiến độ hạng mục.xlsx`: 1 sheet "TĐHM" - placeholder, 0 rows
+</content>
