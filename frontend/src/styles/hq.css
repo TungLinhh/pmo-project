@@ -309,6 +309,9 @@ table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3p
 }
 
 @media (max-width: 768px) {
+  .shell {
+    grid-template-columns: 1fr !important;  /* full width, sidebar fixed overlay */
+  }
   .shell-hamburger { display: flex; }
   .drawer-close { display: block; }
   .shell-sidebar {
@@ -327,6 +330,7 @@ table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3p
   }
   .shell-main {
     margin-left: 0 !important;
+    width: 100% !important;
   }
   .drawer-backdrop {
     display: block;
@@ -347,6 +351,42 @@ table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3p
   }
   .kpi-strip {
     grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .pillar-grid {
+    grid-template-columns: 1fr !important;  /* stack pillars */
+  }
+  .filter-bar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .filter-bar label,
+  .filter-bar select,
+  .filter-bar input {
+    min-width: 0;
+  }
+  /* Page header */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 8px;
+  }
+  .page-header-right {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* Modal full width on mobile */
+  .modal {
+    width: calc(100vw - 24px) !important;
+    max-width: 100% !important;
+    margin: 12px !important;
+  }
+  /* KPI card */
+  .kpi-card {
+    padding: 8px 10px !important;
+  }
+  .kpi-card .value {
+    font-size: 18px !important;
   }
 }
 

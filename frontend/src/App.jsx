@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Login from './components/Login.jsx';
 import HqShell from './components/HqShell.jsx';
 import ToastContainer from './components/Toast.jsx';
+import { ConfirmProvider } from './components/Confirm.jsx';
 import FieldShell from './components/FieldShell.jsx';
 import ControlCenter from './hq/ControlCenter.jsx';
 import ProjectOverview from './hq/ProjectOverview.jsx';
@@ -62,7 +63,7 @@ function ProjectsList() {
 
 export default function App() {
   return (
-    <>
+    <ConfirmProvider>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -105,6 +106,6 @@ export default function App() {
       </Routes>
     </BrowserRouter>
     <ToastContainer />
-    </>
+    </ConfirmProvider>
   );
 }

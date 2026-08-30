@@ -1,19 +1,25 @@
-// UI-019: Approval Center - wired với transition API thật
-// 3 loại pending: shop_drawings (REVIEW), material_submittals (SUBMITTED), payment_requests (PENDING)
+// UI-019: Approval Center - inline expand + confirm + same API/logic
+// - Reject ở View Details dùng cùng transition API với Reject ở list
+// - Approve/Reject đều có confirm trước khi gọi API
+// - View Details = inline expand ngay dưới dòng được chọn
 import { useEffect, useState } from 'react';
-import { projects, shopApi, materials, issues, getToken } from '../api/index.js';
+import { projects, shopApi, materials, getToken } from '../api/index.js';
 import { toast } from '../components/Toast.jsx';
 import { ICON } from '../icons.jsx';
+import { useConfirm } from '../components/Confirm.jsx';
 
 export default function Approval() {
   const [shopItems, setShopItems] = useState([]);
   const [submittalItems, setSubmittalItems] = useState([]);
   const [paymentItems, setPaymentItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [rejectModal, setRejectModal] = useState(null); // { type, id, label }
+  const [rejectModal, setRejectModal] = useState(null); // { type, id, label, reason, onSubmit }
   const [rejectReason, setRejectReason] = useState('');
   const [busyId, setBusyId] = useState(null);
-  const [detailModal, setDetailModal] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);  // {type, id} or null
+  const [detailCache, setDetailCache] = useState({});  // cache fetch details
+  const [detailLoading, setDetailLoading] = useState(false);
+  const confirm = useConfirm();
 
   async function load() {
     setLoading(true);
@@ -26,12 +32,10 @@ export default function Approval() {
 
       // Material submittals
       const subResp = await materials.overdue(1).catch(() => []);
-      // Submittals in SUBMITTED status — query separately
       const subAll = await fetch('/api/projects/1/material-submittals?status=SUBMITTED&limit=20', {
         headers: { Authorization: `Bearer ${getToken()}` }
       }).then(r => r.json()).catch(() => []);
       const allSub = [...(Array.isArray(subResp) ? subResp : []), ...(Array.isArray(subAll) ? subAll : [])];
-      // Dedup by id
       const seen = new Set();
       setSubmittalItems(allSub.filter(x => { if (seen.has(x.id)) return false; seen.add(x.id); return true; }));
 
@@ -48,18 +52,33 @@ export default function Approval() {
   }
   useEffect(() => { load(); }, []);
 
-  // ===== Approve handlers =====
+  // ===== Approve handlers - dùng chung confirmApprove =====
   async function approveShop(id) {
+    const ok = await confirm({
+      title: 'Xác nhận duyệt',
+      message: `Bạn có chắc chắn muốn DUYỆT shop drawing #${id}?`,
+      confirmText: 'Duyệt',
+      confirmStyle: 'primary',
+    });
+    if (!ok) return;
     setBusyId('shop-' + id);
     try {
       await shopApi.transition(id, 'APPROVED', '');
       toast.success('Shop drawing #' + id + ' đã APPROVED');
       setShopItems(arr => arr.filter(x => x.id !== id));
+      setExpandedId(null);
     } catch (e) {
       toast.error('Approve thất bại: ' + e.message);
     } finally { setBusyId(null); }
   }
   async function approveSubmittal(id) {
+    const ok = await confirm({
+      title: 'Xác nhận duyệt',
+      message: `Bạn có chắc chắn muốn DUYỆT material submittal #${id}?`,
+      confirmText: 'Duyệt',
+      confirmStyle: 'primary',
+    });
+    if (!ok) return;
     setBusyId('sub-' + id);
     try {
       const r = await fetch('/api/material-submittals/' + id + '/approve', {
@@ -69,11 +88,19 @@ export default function Approval() {
       if (r.error) throw new Error(r.error);
       toast.success('Material submittal #' + id + ' đã APPROVED');
       setSubmittalItems(arr => arr.filter(x => x.id !== id));
+      setExpandedId(null);
     } catch (e) {
       toast.error('Approve thất bại: ' + e.message);
     } finally { setBusyId(null); }
   }
   async function approvePayment(id) {
+    const ok = await confirm({
+      title: 'Xác nhận duyệt',
+      message: `Bạn có chắc chắn muốn DUYỆT payment request #${id}?`,
+      confirmText: 'Duyệt',
+      confirmStyle: 'primary',
+    });
+    if (!ok) return;
     setBusyId('pay-' + id);
     try {
       const r = await fetch('/api/payment-requests/' + id, {
@@ -84,12 +111,13 @@ export default function Approval() {
       if (r.error) throw new Error(r.error);
       toast.success('Payment request #' + id + ' đã APPROVED');
       setPaymentItems(arr => arr.filter(x => x.id !== id));
+      setExpandedId(null);
     } catch (e) {
       toast.error('Approve thất bại: ' + e.message);
     } finally { setBusyId(null); }
   }
 
-  // ===== Reject handlers (modal for reason) =====
+  // ===== Reject handlers - dùng modal reason + same API as list view =====
   function openReject(type, id, label) {
     setRejectModal({ type, id, label });
     setRejectReason('');
@@ -102,6 +130,7 @@ export default function Approval() {
     const { type, id } = rejectModal;
     setBusyId(type + '-' + id);
     try {
+      // Dùng đúng cùng API logic với Reject ở list
       if (type === 'shop') {
         await shopApi.transition(id, 'REJECTED', rejectReason);
         toast.success('Shop drawing #' + id + ' đã REJECTED');
@@ -121,14 +150,22 @@ export default function Approval() {
         setPaymentItems(arr => arr.filter(x => x.id !== id));
       }
       setRejectModal(null);
+      setExpandedId(null);
     } catch (e) {
       toast.error('Reject thất bại: ' + e.message);
     } finally { setBusyId(null); }
   }
 
-  // ===== Detail =====
-  async function openDetail(type, id) {
-    setDetailModal({ type, id, data: null, loading: true });
+  // ===== Inline expand: fetch detail ngay dưới dòng =====
+  async function toggleExpand(type, id) {
+    if (expandedId && expandedId.type === type && expandedId.id === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId({ type, id });
+    const key = `${type}-${id}`;
+    if (detailCache[key]) return;  // already loaded
+    setDetailLoading(true);
     try {
       let url = null;
       if (type === 'shop') url = '/api/shop-drawings/' + id;
@@ -136,13 +173,85 @@ export default function Approval() {
       else if (type === 'payment') url = '/api/payment-requests/' + id;
       if (!url) return;
       const r = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json());
-      setDetailModal({ type, id, data: r, loading: false });
+      setDetailCache(prev => ({ ...prev, [key]: r }));
     } catch (e) {
-      setDetailModal({ type, id, data: { error: e.message }, loading: false });
+      setDetailCache(prev => ({ ...prev, [key]: { error: e.message } }));
+    } finally {
+      setDetailLoading(false);
     }
   }
 
+  // Reject from inline detail - dùng cùng openReject
+  function rejectFromDetail(type, id, label) {
+    openReject(type, id, label);
+  }
+
   const totalPending = shopItems.length + submittalItems.length + paymentItems.length;
+
+  // Render helper cho 1 item
+  function renderItem(type, i) {
+    const isExpanded = expandedId && expandedId.type === type && expandedId.id === i.id;
+    const key = `${type}-${i.id}`;
+    const detail = detailCache[key];
+    const label = i.drawing_code || i.submittal_code || i.request_no || `#${i.id}`;
+    return (
+      <div key={i.id} style={{ borderBottom: '1px solid var(--c-border)' }}>
+        <div style={{ padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+              <span className="badge" style={{ background: 'var(--c-surface-2)', color: 'var(--c-text-2)' }}>
+                {type === 'shop' ? 'Shop' : type === 'submittal' ? 'Submittal' : 'Payment'}
+              </span>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>{label}</span>
+              <span className={`badge workflow-${i.status || (type === 'shop' ? 'REVIEW' : type === 'submittal' ? 'SUBMITTED' : 'PENDING')}`}>
+                {i.status || (type === 'shop' ? 'REVIEW' : type === 'submittal' ? 'SUBMITTED' : 'PENDING')}
+              </span>
+            </div>
+            <div style={{ color: 'var(--c-text-2)', fontSize: 12 }}>
+              {type === 'shop' && <>Submitted: {i.submitted_by || '—'} · Revision: {i.revision || 0}</>}
+              {type === 'submittal' && <>Revision: {i.revision_number || 0} · SLA: {i.sla_deadline || 'N/A'} {i.sla_deadline && new Date(i.sla_deadline) < new Date() ? '⚠️ OVERDUE' : ''}</>}
+              {type === 'payment' && <>Amount: {(i.amount || 0).toLocaleString()} · Due: {i.due_date || 'N/A'}</>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn" onClick={() => type === 'shop' ? approveShop(i.id) : type === 'submittal' ? approveSubmittal(i.id) : approvePayment(i.id)}
+              disabled={busyId === type + '-' + i.id}>
+              <ICON.check size={12} />{busyId === type + '-' + i.id ? '...' : 'Approve'}
+            </button>
+            <button className="btn btn-secondary" onClick={() => openReject(type, i.id, label)}>
+              <ICON.x size={12} />Reject
+            </button>
+            <button className="btn btn-secondary" onClick={() => toggleExpand(type, i.id)}>
+              <ICON.eye size={12} />{isExpanded ? 'Hide' : 'View Details'}
+            </button>
+          </div>
+        </div>
+        {/* Inline expand: hiển thị ngay dưới dòng */}
+        {isExpanded && (
+          <div style={{ padding: '0 14px 14px 14px', background: 'var(--c-surface-2)', borderTop: '1px solid var(--c-border)' }}>
+            <div style={{ padding: '12px 0', fontSize: 12, color: 'var(--c-text-2)' }}>
+              {detailLoading && !detail ? 'Đang tải chi tiết...' :
+               detail?.error ? <span style={{ color: 'var(--c-critical)' }}>Lỗi: {detail.error}</span> :
+               !detail ? 'Không có dữ liết chi tiết' :
+               <pre style={{ background: 'var(--c-surface)', padding: 10, borderRadius: 4, fontSize: 11, maxHeight: 300, overflow: 'auto', margin: 0 }}>
+                 {JSON.stringify(detail, null, 2)}
+               </pre>}
+            </div>
+            {/* Actions in expanded view - gọi cùng logic với list */}
+            <div style={{ display: 'flex', gap: 6, paddingBottom: 12, borderTop: '1px dashed var(--c-border)', paddingTop: 10 }}>
+              <button className="btn" onClick={() => type === 'shop' ? approveShop(i.id) : type === 'submittal' ? approveSubmittal(i.id) : approvePayment(i.id)}
+                disabled={busyId === type + '-' + i.id}>
+                <ICON.check size={12} />{busyId === type + '-' + i.id ? '...' : 'Approve từ chi tiết'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => rejectFromDetail(type, i.id, label)}>
+                <ICON.x size={12} />Reject từ chi tiết
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -166,31 +275,7 @@ export default function Approval() {
       <div className="data-table">
         {loading ? <div className="empty">Đang tải...</div> :
          shopItems.length === 0 ? <div className="empty">Không có shop drawing nào đang REVIEW</div> :
-         shopItems.map(i => (
-          <div key={i.id} style={{ padding: 14, borderBottom: '1px solid var(--c-border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span className="badge" style={{ background: 'var(--c-surface-2)', color: 'var(--c-text-2)' }}>Shop</span>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{i.drawing_code || i.name_vi || '#' + i.id}</span>
-                </div>
-                <div style={{ color: 'var(--c-text-2)', fontSize: 12 }}>Submitted by: {i.submitted_by || '—'} · Revision: {i.revision || 0}</div>
-              </div>
-              <span className={`badge workflow-${i.status || 'REVIEW'}`}>{i.status || 'REVIEW'}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={() => approveShop(i.id)} disabled={busyId === 'shop-' + i.id}>
-                <ICON.check size={12} />{busyId === 'shop-' + i.id ? '...' : 'Approve'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => openReject('shop', i.id, i.drawing_code || 'Shop #' + i.id)}>
-                <ICON.x size={12} />Reject
-              </button>
-              <button className="btn btn-secondary" onClick={() => openDetail('shop', i.id)}>
-                <ICON.eye size={12} />View detail
-              </button>
-            </div>
-          </div>
-        ))}
+         shopItems.map(i => renderItem('shop', i))}
       </div>
 
       {/* Section: Material submittals */}
@@ -198,33 +283,7 @@ export default function Approval() {
       <div className="data-table">
         {loading ? <div className="empty">Đang tải...</div> :
          submittalItems.length === 0 ? <div className="empty">Không có material submittal nào đang chờ duyệt</div> :
-         submittalItems.map(i => (
-          <div key={'sub-' + i.id} style={{ padding: 14, borderBottom: '1px solid var(--c-border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span className="badge" style={{ background: 'var(--c-surface-2)', color: 'var(--c-text-2)' }}>Submittal</span>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{i.submittal_code || '#' + i.id}</span>
-                </div>
-                <div style={{ color: 'var(--c-text-2)', fontSize: 12 }}>
-                  Revision: {i.revision_number || 0} · SLA: {i.sla_deadline || 'N/A'} {i.sla_deadline && new Date(i.sla_deadline) < new Date() ? '⚠️ OVERDUE' : ''}
-                </div>
-              </div>
-              <span className={`badge workflow-${i.status || 'SUBMITTED'}`}>{i.status || 'SUBMITTED'}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={() => approveSubmittal(i.id)} disabled={busyId === 'sub-' + i.id}>
-                <ICON.check size={12} />{busyId === 'sub-' + i.id ? '...' : 'Approve'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => openReject('submittal', i.id, i.submittal_code || 'Submittal #' + i.id)}>
-                <ICON.x size={12} />Reject
-              </button>
-              <button className="btn btn-secondary" onClick={() => openDetail('submittal', i.id)}>
-                <ICON.eye size={12} />View detail
-              </button>
-            </div>
-          </div>
-        ))}
+         submittalItems.map(i => renderItem('submittal', i))}
       </div>
 
       {/* Section: Payment requests */}
@@ -232,33 +291,7 @@ export default function Approval() {
       <div className="data-table">
         {loading ? <div className="empty">Đang tải...</div> :
          paymentItems.length === 0 ? <div className="empty">Không có payment request nào đang PENDING</div> :
-         paymentItems.map(i => (
-          <div key={'pay-' + i.id} style={{ padding: 14, borderBottom: '1px solid var(--c-border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span className="badge" style={{ background: 'var(--c-surface-2)', color: 'var(--c-text-2)' }}>Payment</span>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{i.request_no || '#' + i.id}</span>
-                </div>
-                <div style={{ color: 'var(--c-text-2)', fontSize: 12 }}>
-                  Amount: {i.amount?.toLocaleString() || 0} · Retention: {i.retention_amount?.toLocaleString() || 0} · Due: {i.due_date || 'N/A'}
-                </div>
-              </div>
-              <span className={`badge workflow-${i.status || 'PENDING'}`}>{i.status || 'PENDING'}</span>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn" onClick={() => approvePayment(i.id)} disabled={busyId === 'pay-' + i.id}>
-                <ICON.check size={12} />{busyId === 'pay-' + i.id ? '...' : 'Approve'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => openReject('payment', i.id, i.request_no || 'Payment #' + i.id)}>
-                <ICON.x size={12} />Reject
-              </button>
-              <button className="btn btn-secondary" onClick={() => openDetail('payment', i.id)}>
-                <ICON.eye size={12} />View detail
-              </button>
-            </div>
-          </div>
-        ))}
+         paymentItems.map(i => renderItem('payment', i))}
       </div>
 
       {totalPending === 0 && !loading && (
@@ -267,7 +300,7 @@ export default function Approval() {
         </div>
       )}
 
-      {/* Reject modal */}
+      {/* Reject modal (vẫn dùng modal vì cần nhập reason) */}
       {rejectModal && (
         <div className="modal-backdrop" onClick={() => setRejectModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -279,26 +312,6 @@ export default function Approval() {
               <button className="btn" style={{ background: 'var(--c-critical)', color: '#fff' }} onClick={submitReject} disabled={busyId}>
                 {busyId ? 'Đang xử lý...' : 'Xác nhận Reject'}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Detail modal */}
-      {detailModal && (
-        <div className="modal-backdrop" onClick={() => setDetailModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
-            <h3>Detail: {detailModal.type} #{detailModal.id}</h3>
-            {detailModal.loading ? <div className="empty">Đang tải...</div> :
-             detailModal.data?.error ? <div className="empty" style={{ color: 'var(--c-critical)' }}>Lỗi: {detailModal.data.error}</div> :
-             !detailModal.data ? <div className="empty">Không có dữ liệu chi tiết</div> :
-             (
-              <pre style={{ background: 'var(--c-surface-2)', padding: 12, borderRadius: 6, fontSize: 12, maxHeight: 400, overflow: 'auto' }}>
-                {JSON.stringify(detailModal.data, null, 2)}
-              </pre>
-             )}
-            <div style={{ marginTop: 12, textAlign: 'right' }}>
-              <button className="btn btn-secondary" onClick={() => setDetailModal(null)}>Đóng</button>
             </div>
           </div>
         </div>

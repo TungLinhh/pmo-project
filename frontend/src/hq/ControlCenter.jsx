@@ -195,9 +195,10 @@ export default function ProjectControlCenter() {
 
   // PILLAR 2: Shopdrawing
   const shopTotal = shopData.length;
-  const shopApproved = shopData.filter(s => s.approval_date).length;
-  const shopReview = shopData.filter(s => !s.approval_date && s.bql_l1_response && s.bql_l1_response !== 'R').length;
-  const shopRevision = shopData.filter(s => !s.approval_date && s.bql_l1_response === 'R').length;
+  // shopApproved = status = APPROVED (rely on status field, not approval_date which may be set for other transitions)
+  const shopApproved = shopData.filter(s => s.status === 'APPROVED').length;
+  const shopReview = shopData.filter(s => s.status === 'REVIEW' || (!s.approval_date && s.bql_l1_response && s.bql_l1_response !== 'R' && s.status === 'SUBMITTED')).length;
+  const shopRevision = shopData.filter(s => s.status === 'REJECTED' || (!s.approval_date && s.bql_l1_response === 'R')).length;
   const shopPending = shopTotal - shopApproved - shopReview - shopRevision;
   const shopOverdue = shopData.filter(s => {
     if (s.approval_date) return false;
@@ -365,7 +366,7 @@ export default function ProjectControlCenter() {
           {/* Construction Progress (mục 6.1) */}
           <div
             className="pillar-card"
-            onClick={() => nav('/hq/progress')}
+            onClick={() => nav(`/hq/progress${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('progress')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -398,7 +399,7 @@ export default function ProjectControlCenter() {
           {/* Shopdrawing (mục 6.2) */}
           <div
             className="pillar-card"
-            onClick={() => nav('/hq/shop')}
+            onClick={() => nav(`/hq/shop${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('shop')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -429,7 +430,7 @@ export default function ProjectControlCenter() {
           {/* Material (mục 6.3) */}
           <div
             className="pillar-card"
-            onClick={() => nav('/hq/materials')}
+            onClick={() => nav(`/hq/materials${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('material')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -463,7 +464,7 @@ export default function ProjectControlCenter() {
           {/* Payment (mục 6.4) */}
           <div
             className="pillar-card"
-            onClick={() => nav('/hq/payment')}
+            onClick={() => nav(`/hq/payment${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('payment')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
