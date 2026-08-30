@@ -273,3 +273,115 @@ table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3p
   justify-content: space-between;
   align-items: center;
 }
+
+/* ============ Mobile Nav (<768px) ============ */
+.shell-hamburger {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 60;
+  width: 36px;
+  height: 36px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.drawer-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 70;
+}
+.drawer-close {
+  display: none;
+  background: transparent;
+  color: var(--c-text-2);
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+@media (max-width: 768px) {
+  .shell-hamburger { display: flex; }
+  .drawer-close { display: block; }
+  .shell-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 80;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease-out;
+    box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+  }
+  .shell-sidebar.open {
+    transform: translateX(0);
+  }
+  .shell-main {
+    margin-left: 0 !important;
+  }
+  .drawer-backdrop {
+    display: block;
+  }
+  .shell-header {
+    padding-left: 56px !important;  /* room for hamburger */
+  }
+  .shell-content {
+    padding: 12px !important;
+  }
+  /* Compact table on mobile */
+  .data-table table {
+    font-size: 11px;
+  }
+  .data-table table th,
+  .data-table table td {
+    padding: 4px 6px;
+  }
+  .kpi-strip {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* Pillar card - compact layout */
+.pillar-card {
+  padding: 10px 12px !important;
+  gap: 6px !important;
+  min-height: 200px;
+}
+.pillar-card .head {
+  margin-bottom: 4px !important;
+}
+.pillar-card h3 {
+  font-size: 12.5px !important;
+  margin: 0 !important;
+}
+.pillar-card .breakdown {
+  margin-top: 4px !important;
+}
+.pillar-card .breakdown .row {
+  padding: 1px 0 !important;
+  font-size: 10.5px !important;
+}
+.pillar-card .warnings {
+  margin-top: 4px !important;
+  font-size: 10.5px !important;
+}
+.pillar-card .view-link {
+  margin-top: 4px !important;
+  font-size: 10.5px !important;
+}
+.pillar-card .pie-wrap {
+  flex-shrink: 0;
+}
+.pillar-card > div[style*="display: flex"] {
+  margin-bottom: 4px !important;
+  gap: 12px !important;
+}

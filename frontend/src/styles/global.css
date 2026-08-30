@@ -407,6 +407,13 @@ body.theme-dark {
   --c-submitted: #38bdf8;   /* sky-400 */
   --c-submitted-bg: rgba(56, 189, 248, 0.12);
   --c-draft: #94a3b8;
+  --c-draft-bg: rgba(148, 163, 184, 0.15);
+  --c-approved: #4ade80;
+  --c-approved-bg: rgba(74, 222, 128, 0.12);
+  --c-rejected: #f87171;
+  --c-rejected-bg: rgba(248, 113, 113, 0.12);
+  --c-overdue: #f87171;
+  --c-overdue-bg: rgba(248, 113, 113, 0.12);
   --c-closed: #64748b;
   --c-closed-bg: rgba(100, 116, 139, 0.12);
 }
@@ -566,4 +573,109 @@ body.theme-dark code {
 @keyframes tooltipFade {
   from { opacity: 0; transform: translateY(-2px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Dark mode table + badges + cells */
+body.theme-dark .data-table {
+  background: var(--c-surface);
+  border-color: var(--c-border);
+}
+body.theme-dark .data-table table thead th {
+  background: var(--c-surface-2) !important;
+  color: var(--c-text-2) !important;
+  border-color: var(--c-border) !important;
+}
+body.theme-dark .data-table table tbody tr td {
+  background: transparent;
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+body.theme-dark .data-table table tbody tr:hover {
+  background: var(--c-surface-2);
+}
+body.theme-dark .data-table table tbody tr.exception,
+body.theme-dark tr.exception {
+  background: rgba(251, 191, 36, 0.10) !important;
+}
+body.theme-dark .data-table table tbody tr.exception td {
+  background: transparent;
+  color: var(--c-text);
+}
+body.theme-dark .modal {
+  background: var(--c-surface) !important;
+  border: 1px solid var(--c-border);
+}
+body.theme-dark .modal h3 {
+  color: var(--c-text);
+}
+body.theme-dark .modal .meta,
+body.theme-dark .modal label {
+  color: var(--c-text-2);
+}
+body.theme-dark .filter-bar {
+  background: var(--c-surface) !important;
+  border-color: var(--c-border);
+}
+body.theme-dark .page-header {
+  border-color: var(--c-border);
+}
+body.theme-dark .code,
+body.theme-dark code {
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+body.theme-dark .kpi-card,
+body.theme-dark .pillar-card,
+body.theme-dark .section,
+body.theme-dark .stat,
+body.theme-dark .card {
+  background: var(--c-surface);
+  border-color: var(--c-border);
+}
+body.theme-dark .cell-bar .bar {
+  background: var(--c-surface-3);
+}
+body.theme-dark .empty {
+  color: var(--c-text-3);
+}
+body.theme-dark hr {
+  border-color: var(--c-border);
+}
+body.theme-dark .shell-menu a {
+  color: var(--c-text-2);
+}
+body.theme-dark .shell-menu a:hover,
+body.theme-dark .shell-menu a.active {
+  background: var(--c-surface-2) !important;
+  color: var(--c-text) !important;
+}
+body.theme-dark .shell-freshness {
+  color: var(--c-text-2);
+}
+body.theme-dark .shell-user-name {
+  color: var(--c-text);
+}
+body.theme-dark .shell-user-role {
+  color: var(--c-text-2);
+}
+body.theme-dark .shell-header h2 {
+  color: var(--c-text);
+}
+body.theme-dark .data-table-body {
+  background: var(--c-surface);
+}
+body.theme-dark .toast {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+body.theme-dark .cell-bar > span {
+  color: var(--c-text-2);
+}
+body.theme-dark .field-icon-btn {
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+body.theme-dark .field-icon-btn:hover {
+  background: var(--c-surface-3);
 }

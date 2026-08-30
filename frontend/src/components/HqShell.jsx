@@ -68,6 +68,11 @@ export default function HqShell() {
     try { localStorage.setItem('pmo_theme', theme); } catch {}
   }, [theme]);
 
+  // Mobile drawer state - mặc định ẩn trên mobile
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Auto-close drawer khi route thay đổi
+  useEffect(() => { setDrawerOpen(false); }, [window.location.pathname]);
+
   function logout() {
     setToken(null);
     setUser(null);
@@ -80,15 +85,32 @@ export default function HqShell() {
 
   return (
     <div className="shell">
-      <aside className="shell-sidebar">
+      {/* Mobile hamburger - chỉ hiện <768px */}
+      <button
+        className="shell-hamburger"
+        onClick={() => setDrawerOpen(true)}
+        aria-label="Open menu"
+        title="Open menu"
+      >
+        <ICON.menu size={18} />
+      </button>
+
+      {/* Mobile drawer overlay */}
+      {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
+
+      <aside className={`shell-sidebar${drawerOpen ? ' open' : ''}`}>
         <div className="shell-brand">
           <div className="logo">O</div>
           <div className="text">
             <span className="name">O-NEXUS</span>
             <span className="sub">Project Control</span>
           </div>
+          {/* Close button - chỉ hiện trong drawer mode (mobile) */}
+          <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close menu">
+            <ICON.close size={16} />
+          </button>
         </div>
-        <nav className="shell-menu">
+        <nav className="shell-menu" onClick={() => setDrawerOpen(false)}>
           {MENU.map(group => {
             const items = group.items.filter(i => !hide.some(h => i.to.includes(h)));
             if (items.length === 0) return null;

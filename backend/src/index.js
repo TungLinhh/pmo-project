@@ -7,6 +7,7 @@ import { saveFile, getFilePath, fileExists } from './lib/storage.js';
 import { detectDocType, listSheets } from './lib/excel.js';
 import { getDb, closeDb } from './db/index.js';
 import { ingest, findOrCreateProject } from './services/ingest/index.js';
+import { getPermissions } from './lib/permissions.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,7 +16,9 @@ const TENANT_ID = 1;  // hardcoded for MVP
 app.use(cors());
 app.use(express.json());
 import { authMiddleware } from './lib/auth.js';
+import { permissionMiddleware } from './lib/permission-middleware.js';
 app.use(authMiddleware);
+app.use(permissionMiddleware);
 
 // ============ Rate Limiting ============
 // Login: chặt - 5 requests / phút / IP (chống brute force)
@@ -902,10 +905,12 @@ app.get('/api/me/permissions', (req, res) => {
     full_name: session.full_name, is_ceo: u.is_ceo === 1
   };
   const userRole = getUserRole(user);
-  const modules = ['shop', 'payment', 'material', 'schedule', 'master_data', 'approval'];
-  const perms = {};
-  for (const m of modules) perms[m] = { read: hasPermission(user, m, 'read'), write: hasPermission(user, m, 'write') };
-  res.json({ role: userRole, is_ceo: user.is_ceo, permissions: perms });
+  // TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) - dùng PERMISSION_MATRIX mới
+  // Return full matrix so FE can hide menu/buttons
+  // Admin luôn full access (override getUserRole map)
+  const effectiveRole = (u.role === 'admin') ? 'ADMIN' : userRole;
+  const fullPerms = getPermissions(effectiveRole);
+  res.json({ role: effectiveRole, is_ceo: user.is_ceo, permissions: fullPerms });
 });
 
 // ============ Notification channel logic (43.6) ============

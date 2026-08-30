@@ -376,7 +376,6 @@ export default function ProjectControlCenter() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
               <div className="pie-wrap">
                 <PieChart data={constructionPieData} size={96} thickness={18} centerText={`${constructionPct}%`} centerSub="completion" />
-                {hoveredPillar === 'progress' && <PieTooltip data={constructionPieData} />}
               </div>
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--c-text-2)', lineHeight: 1.6 }}>
                 <div><strong style={{ color: 'var(--c-on-track)' }}>{completedItems}</strong> / {totalItems} items done</div>
@@ -410,7 +409,6 @@ export default function ProjectControlCenter() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
               <div className="pie-wrap">
                 <PieChart data={shopPieData} size={96} thickness={18} centerText={`${shopApprovalPct}%`} centerSub="approved" />
-                {hoveredPillar === 'shop' && <PieTooltip data={shopPieData} />}
               </div>
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--c-text-2)', lineHeight: 1.6 }}>
                 <div><strong style={{ color: 'var(--c-on-track)' }}>{shopApproved}</strong> approved</div>
@@ -442,7 +440,6 @@ export default function ProjectControlCenter() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
               <div className="pie-wrap">
                 <PieChart data={matPieData} size={96} thickness={18} centerText={`${matTotal}`} centerSub="items" />
-                {hoveredPillar === 'material' && <PieTooltip data={matPieData} />}
               </div>
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--c-text-2)', lineHeight: 1.6 }}>
                 <div><strong style={{ color: 'var(--c-on-track)' }}>{matDelivered}</strong> delivered</div>
@@ -477,7 +474,6 @@ export default function ProjectControlCenter() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
               <div className="pie-wrap">
                 <PieChart data={payPieData} size={96} thickness={18} centerText={`${payCompletion}%`} centerSub="paid" />
-                {hoveredPillar === 'payment' && <PieTooltip data={payPieData} />}
               </div>
               <div style={{ flex: 1, fontSize: 11.5, color: 'var(--c-text-2)', lineHeight: 1.6 }}>
                 <div><strong style={{ color: 'var(--c-on-track)' }}>{payPaid}</strong> paid</div>

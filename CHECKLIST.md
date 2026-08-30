@@ -261,3 +261,35 @@ npm run build
 - `docs/daily_report_verification.md`
 - `docs/docker_build_test_report.md`
 - `README.md` (7KB, GitHub-ready)
+
+
+## Update 2026-08-30 vòng 6 (mobile nav + permission matrix + tooltip + dark mode audit)
+
+| # | Mục | Status | Ghi chú |
+|---|---|---|---|
+| 1 | Mobile nav (hamburger + drawer) | ✅ DONE | <768px ẩn sidebar, hamburger mở drawer 280px, click outside đóng. Verified bằng Playwright viewport 375×667 |
+| 2 | Permission matrix (6 role) | ✅ DONE | `lib/permissions.js` + middleware. Test: 130/130 PASS (admin/CEO full, PM limited, etc). Endpoint /api/me/permissions return full matrix |
+| 3 | Tooltip 4 pillars | ✅ FIXED | Xóa duplicate `<PieTooltip>` ở 4 cards, dùng PieChart built-in (onMouseMove + fixed positioning, offset 18px). Verified tooltip offset 21-30px lệch khỏi path |
+| 4 | Dark mode audit | ✅ DONE | Override 30+ selectors dark mode: badges, table cells, modal headers, inputs, kpi cards, status chips, sidebar menu, page header, code, etc. Add 7 missing CSS vars (c-draft-bg, c-approved, c-rejected, c-overdue + bg). Screenshot 13/13 pages ở dark mode audit folder |
+| 5 | Compact pillar layout | ✅ DONE | padding 10x12, font 12.5px, gap 6px, min-height 200px |
+
+### Files mới
+- `backend/src/lib/permissions.js` (matrix 6 role × 14 module)
+- `backend/src/lib/permission-middleware.js` (block 403 based on role+module+action)
+- `scripts/test-role-permissions.mjs` (130 tests)
+- `scripts/ui-verify-v6.mjs`, `ui-verify-v6-quick.mjs`, `ui-verify-tooltip.mjs`
+
+### Files sửa
+- `backend/src/index.js` (+ permissionMiddleware, /me/permissions dùng matrix)
+- `backend/src/lib/auth.js` (no change)
+- `frontend/src/components/HqShell.jsx` (+hamburger, drawer state)
+- `frontend/src/components/PieChart.jsx` (offset 18px, fixed positioning)
+- `frontend/src/hq/ControlCenter.jsx` (xóa PieTooltip riêng ở 4 pillars)
+- `frontend/src/styles/global.css` (compact pillar + dark mode audit overrides)
+- `frontend/src/styles/hq.css` (mobile media query <768px)
+- `frontend/src/icons.jsx` (menu + close icons)
+
+### Screenshots (docs/bug_screenshots/)
+- v6-mobile-{01,02,03,04}-*.png (mobile nav)
+- v6-tooltip-pie{1,2,3,4}.png (tooltip verify)
+- dark-mode-audit/{login, control-center, projects, progress, shop, materials, manpower, payment, issues, notifications, master-data, approval, audit}.png (13 dark mode pages)

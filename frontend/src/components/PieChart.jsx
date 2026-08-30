@@ -76,18 +76,19 @@ export default function PieChart({ data, size = 88, thickness = 16, centerText, 
           {centerSub && <div style={{ fontSize: 10, color: 'var(--c-text-2)', marginTop: 2 }}>{centerSub}</div>}
         </div>
       )}
-      {/* Cursor-tracking tooltip */}
+      {/* Cursor-tracking tooltip - offset đủ xa để không đè chữ */}
       {hovered && (
         <div
           className="cursor-tooltip"
           style={{
             position: 'fixed',
-            top: tooltipPos.y + 12,
-            left: tooltipPos.x + 12,
+            top: tooltipPos.y + 18,
+            left: tooltipPos.x + 18,
             zIndex: 1000,
             pointerEvents: 'none',
-            minWidth: 160,
+            minWidth: 180,
             maxWidth: 280,
+            transform: 'translate(0, 0)',
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{hovered.label}</div>

@@ -45,6 +45,8 @@ export const ICON = {
   calendar: I(<><rect x="2" y="3" width="12" height="11" rx="1" /><path d="M2 6h12M5 1v3M11 1v3" /></>),
   hash: I(<><path d="M5 2L3 14M13 2l-2 12M2 6h12M1 10h12" /></>),
   building: I(<><rect x="3" y="2" width="10" height="12" rx="1" /><path d="M5 5h1M5 8h1M5 11h1M10 5h1M10 8h1M10 11h1" /></>),
+  menu: I(<><path d="M3 6h18M3 12h18M3 18h18" /></>),
+  close: I(<><path d="M18 6L6 18M6 6l12 12" /></>),
   eye: I(<><path d="M1 8s2-5 7-5 7 5 7 5-2 5-7 5-7-5-7-5z" /><circle cx="8" cy="8" r="2" /></>),
   refresh: I(<><path d="M2 8a6 6 0 0110-4.5L14 5M14 8a6 6 0 01-10 4.5L2 11" /><path d="M14 3v2h-2M2 13v-2h2" /></>),
   sun: I(<><circle cx="8" cy="8" r="3" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M3.5 12.5l1.4-1.4M11.1 4.9l1.4-1.4" /></>),
