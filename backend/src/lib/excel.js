@@ -96,22 +96,39 @@ export function listSheets(filePath) {
 }
 
 // Try to detect doc_type from filename
+// Order matters: more specific patterns first
+// Normalize whitespace and remove double-spaces before matching
 export function detectDocType(filename) {
-  const f = filename.toLowerCase();
+  const f = filename.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // Payment progress FIRST (before generic "tiến độ" match)
+  if (f.includes('thanh toán') || f.includes('thanh toan') || f.includes('payment') || f.includes('hstt')) return 'payment_progress';
+
+  // Business process / subcontractor
   if (f.includes('quy trình thực hiện') || f.includes('quy trinh thuc hien')) return 'business_process';
-  if (f.includes('thầu phụ') || f.includes('thau phu') || f.includes('tổ đội')) return 'subcontractor_directory';
+  if (f.includes('thầu phụ') || f.includes('thau phu') || f.includes('tổ đội') || f.includes('to doi')) return 'subcontractor_directory';
+
+  // Shop / material / construction
   if (f.includes('shop ') || f.includes('shop_') || f.startsWith('shop')) return 'shop_drawing';
   if (f.includes('vật tư') || f.includes('vat tu')) return 'material_supply';
   if (f.includes('tđ ') || f.includes('td ') || f.includes('tiến độ') || f.includes('tiendo')) return 'construction_schedule';
+
+  // Daily report
   if (f.includes('báo cáo công việc') || f.includes('bao cao cong viec') || f.includes('daily')) return 'daily_report';
+
+  // RFA / Material master
   if (f.includes('mcr-mm') || f.includes('rfa') || f.includes('rfa-submission')) return 'rfa_log';
   if (f.includes('mcr-mpm') || f.includes('mpm')) return 'manpower_master_plan';
+
+  // Shop master / work management
   if (f.includes('bte-mshop') || f.includes('mshop')) return 'shop_master';
   if (f.includes('bte-wm') || f.includes('wm-01')) return 'work_management';
+
+  // Other
   if (f.includes('sơ đồ') && f.includes('khu vực')) return 'zone_map';
+  if (f.includes('sơ đồ cây') || f.includes('cây')) return 'work_breakdown';
   if (f.includes('file start')) return 'file_index';
   if (f.includes('nguồn lực') || f.includes('nguon luc') || f.includes('tài nguyên')) return 'resource_directory';
-  if (f.includes('thanh toán') || f.includes('thanh toan') || f.includes('payment') || f.includes('hstt')) return 'payment_progress';
   if (f.includes('duyệt khác') || f.includes('duyet khac')) return 'other_approved';
   return 'unknown';
 }

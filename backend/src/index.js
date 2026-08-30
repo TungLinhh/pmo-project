@@ -5,8 +5,9 @@ import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { saveFile, getFilePath, fileExists } from './lib/storage.js';
 import { detectDocType, listSheets } from './lib/excel.js';
+import { findZoneByName } from './lib/zone_matcher.js';
 import { getDb, closeDb } from './db/index.js';
-import { ingest, findOrCreateProject } from './services/ingest/index.js';
+import { ingest, findOrCreateProject, ingestProjectLevelFile } from './services/ingest/index.js';
 import { getPermissions } from './lib/permissions.js';
 
 const app = express();
@@ -136,26 +137,37 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         // Match: "Shop TST-A", "TĐ TST-B", "Vật tư TST-C"
         const m = originalName.match(/(?:Shop|TĐ|Vật tư|Vat tu|VT|MEP)\s+(.+?)\.xlsx?$/i);
         if (m) {
-          let zone = m[1].toUpperCase().trim()
-            .replace(/\s*&\s*/g, '-')
-            .replace(/^BOH$/, 'BOH')
-            .replace(/^BPV-1\s*BR$/, 'BPV-1BR')
-            .replace(/^BPV-2\s*BR$/, 'BPV-2BR')
-            .replace(/^HPV-1\s*BR$/, 'HPV-1BR')
-            .replace(/^HPV-2\s*BR$/, 'HPV-2BR')
-            .replace(/^RES-3\s*BR$/, 'RES-3BR')
-            .replace(/^RES-4\s*BR$/, 'RES-4BR')
-            .replace(/^BULTER$/, 'BUT')
-            .replace(/^BSC$/, 'BSN')
-            .replace(/^LOB.*SPA$/, 'LOB-SPA')
-            .replace(/^HẠ TẦNG$/, 'INF');
-          ingestOpts.zoneCode = zone;
+          const rawZone = m[1].trim();
+          // Multi-zone rollup patterns
+          if (/TỔNG THỂ CÁC KHU VỰC|HẠNG MỤC|TỔNG THỂ/i.test(rawZone)) {
+            ingestOpts.multiZone = true;
+            ingestOpts.zoneCode = null;
+          } else {
+            // Use fuzzy zone matcher for better alias coverage
+            const zones = db.prepare('SELECT id, code FROM zones WHERE project_id = ?').all(project.id);
+            const zoneId = findZoneByName(rawZone, zones);
+            if (zoneId) {
+              const matchedZone = zones.find(z => z.id === zoneId);
+              ingestOpts.zoneCode = matchedZone ? matchedZone.code : rawZone;
+            } else {
+              // Fallback: strip spaces and dashes, hope for the best
+              ingestOpts.zoneCode = rawZone.toUpperCase().replace(/\s+/g, '').replace(/[-_]/g, '');
+            }
+          }
+        }
+        // Match: "Tiến độ thi công tổng thể các khu vực" (no Shop/TĐ prefix)
+        else if (/tổng thể|hạng mục|tổng hợp/i.test(originalName)) {
+          ingestOpts.multiZone = true;
+          ingestOpts.zoneCode = null;
         }
       }
 
-      console.log('DEBUG upload: expectedDocType=', expectedDocType, 'projectId=', project.id, 'ingestOpts=', ingestOpts);
-      ingestResult = await ingest(fullPath, expectedDocType, ingestOpts);
-      console.log('DEBUG upload: ingestResult=', JSON.stringify(ingestResult).slice(0, 200));
+      // For multi-zone rollup files, use project-level ingestor (matches by name inside rows)
+      if (ingestOpts.multiZone) {
+        ingestResult = await ingestProjectLevelFile(fullPath, project.id, expectedDocType);
+      } else {
+        ingestResult = await ingest(fullPath, expectedDocType, ingestOpts);
+      }
     } catch (e) {
       console.error('DEBUG upload: ingest FAILED:', e.message, e.stack);
       db.prepare(`UPDATE file_uploads SET status = 'FAILED', report_json = ? WHERE id = ?`).run(JSON.stringify({ error: e.message }), uploadId);

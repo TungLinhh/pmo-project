@@ -33,6 +33,7 @@ data/pmo.db-*
 data/pmo.db-shm
 data/pmo.db-wal
 data/uploads/
+backend/uploads/
 data/test-fixtures/
 backend/data/
 backend/scripts/archive/pmo-*.db
