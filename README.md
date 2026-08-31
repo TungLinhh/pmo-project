@@ -2,6 +2,19 @@
 
 > Construction project management system with 4-pillar dashboard (Construction / Shop Drawing / Material / Payment), 7 role-based accounts, Excel upload pipeline for 9 doc types, approval workflow, dark mode (WCAG AA), and full PostgreSQL/SQLite data layer.
 
+## 📚 Documentation
+
+Full documentation is in **[docs/](docs/)**:
+- **[docs/README.md](docs/README.md)** - Documentation index
+- **[docs/CODEBASE.md](docs/CODEBASE.md)** - Every file, every function, every API route
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design + data flow
+- **[docs/SETUP_FOR_CLIENT.md](docs/SETUP_FOR_CLIENT.md)** - Deploy for client
+- **[docs/OPERATIONS.md](docs/OPERATIONS.md)** - Runbook (backup, monitoring, fixes)
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** - End-user docs
+- **[docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)** - Dev workflow
+- **[demo_script.md](demo_script.md)** - 30-min stakeholder demo
+- **[CHECKLIST.md](CHECKLIST.md)** - Per-vòng progress log
+
 ## Tech Stack
 
 - **Backend:** Node.js 20 + Express 4 + better-sqlite3 / PostgreSQL 16 (Drizzle ORM)
