@@ -15,6 +15,7 @@ out/
 *.tsbuildinfo
 .vite/
 .cache/
+frontend/dist/
 
 # ===== Environment / secrets =====
 .env
@@ -28,10 +29,13 @@ credentials.json
 secrets.json
 
 # ===== Local data (KHÔNG commit data thật) =====
-data/pmo.db
-data/pmo.db-*
-data/pmo.db-shm
-data/pmo.db-wal
+data/
+backend/data/
+backend/uploads/
+data/test-fixtures/
+backend/scripts/archive/pmo-*.db
+
+# ===== PostgreSQL data dirs (local dev) =====
 data/pgdata/
 data/pg_wal/
 data/pg_log/
@@ -49,13 +53,8 @@ data/pg_subtrans/
 data/pg_dist_plat/
 data/pg_tblspc/
 data/pg_global/
-data/uploads/
-backend/uploads/
-data/test-fixtures/
-backend/data/
-backend/scripts/archive/pmo-*.db
 
-# ===== IDE =====
+# ===== IDE / OS =====
 .idea/
 .vscode/
 *.swp
@@ -63,31 +62,21 @@ backend/scripts/archive/pmo-*.db
 *~
 .DS_Store
 Thumbs.db
-
-# ===== OS =====
 .directory
 .Trash-*
 
 # ===== Logs =====
 *.log
 logs/
-npm-debug.log*
 
 # ===== Test outputs =====
 coverage/
 .nyc_output/
 playwright-report/
 test-results/
-docs/bug_screenshots/
-../.openclaw/
 
-# Reference sheets (large PDFs from user)
+# ===== Reference sheets (large PDFs from user) =====
 reference_sheets/
-pmo_project/
 
-# ===== E2E test scripts (dev only, không cần commit) =====
-_e2e_debug*.mjs
-_e2e_browser.mjs
-_test_picker.mjs
-_schema_audit*.mjs
-_screenshots/
+# ===== Misc =====
+.openclaw/

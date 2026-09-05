@@ -1,9 +1,78 @@
-node_modules
-npm-debug.log
+# ===== Git / metadata =====
 .git
 .gitignore
-.env
-data/
-uploads/
-*.md
+.github
+.gitattributes
+
+# ===== Documentation =====
+# Docs are not needed in the runtime image
 docs/
+
+# ===== Test files =====
+tests/
+_e2e_*.mjs
+_schema_audit*.mjs
+_test_picker.mjs
+playwright.config.*
+playwright-report/
+
+# ===== CI / scripts (dev only) =====
+**/.github
+**/.circleci
+**/.gitlab-ci.yml
+**/Dockerfile
+**/docker-compose*.yml
+**/.dockerignore
+docker-entrypoint.sh
+docker-compose.yml
+
+# ===== Node / dependencies =====
+node_modules
+**/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm
+.yarn
+
+# ===== Build outputs =====
+dist
+build
+out
+*.tsbuildinfo
+.vite
+.cache
+
+# ===== Environment / secrets =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+*.p12
+credentials.json
+secrets.json
+
+# ===== Local data (mounted as volume, not baked into image) =====
+data/
+backend/data/
+backend/uploads/
+data/test-fixtures/
+data/pgdata/
+
+# ===== IDE / OS =====
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.directory
+.Trash-*
+
+# ===== Logs =====
+*.log
+logs/
