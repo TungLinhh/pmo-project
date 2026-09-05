@@ -7,6 +7,7 @@ import { ICON } from '../icons.jsx';
 import PieChart from '../components/PieChart.jsx';
 import PieTooltip from '../components/PieTooltip.jsx';
 import { toast } from '../components/Toast.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 export default function Materials() {
   const [params] = useSearchParams();
@@ -68,9 +69,7 @@ export default function Materials() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
         <input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1 }} />
       </div>
 

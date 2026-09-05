@@ -1,25 +1,62 @@
-// Database initialization script
-import { readFileSync } from 'node:fs';
+// Database initialization — PG only.
+// Applies drizzle migrations from drizzle/0000_*.sql (skips if already applied).
+// Seeds default tenant + admin user + demo projects + zones.
+// Also creates unique indexes required by upsert().
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { getDb, closeDb } from './index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const schemaPath = join(__dirname, 'schema.sql');
-const schema = readFileSync(schemaPath, 'utf8');
-
 const db = getDb();
 
-console.log('Initializing database...');
-db.exec(schema);
-console.log('✓ Schema created');
+console.log('Initializing PostgreSQL database...');
+
+// Apply migrations
+const drizzleDir = join(__dirname, '..', '..', 'drizzle');
+const alreadyApplied = await db.prepare(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenants')`).getAsync();
+if (!alreadyApplied?.exists) {
+  const files = readdirSync(drizzleDir).filter(f => f.endsWith('.sql')).sort();
+  for (const f of files) {
+    const sql = readFileSync(join(drizzleDir, f), 'utf8');
+    console.log(`  Applying ${f}...`);
+    await db.exec(sql);
+  }
+  console.log(`✓ Applied ${files.length} migration(s)`);
+} else {
+  console.log(`✓ Schema already applied`);
+}
+
+// Patch tables that were added after initial drizzle migrations
+// (issues, directives — required by routes but missing from drizzle schema)
+const patches = readdirSync(drizzleDir).filter(f => f.match(/^9\d{3}_/)).sort();
+for (const p of patches) {
+  const sql = readFileSync(join(drizzleDir, p), 'utf8');
+  await db.exec(sql);
+  console.log(`✓ Applied patch ${p}`);
+}
+
+// Create unique indexes required by db.upsert() in ingestors
+const requiredIndexes = [
+  { name: 'business_process_steps_process_ord_uq', table: 'business_process_steps', cols: ['process_id', 'ordinal'] },
+  { name: 'construction_schedule_items_uq', table: 'construction_schedule_items', cols: ['project_id', 'zone_id', 'source_sheet', 'ordinal'] },
+  { name: 'subcontractors_tenant_name_uq', table: 'subcontractors', cols: ['tenant_id', 'name'] },
+  { name: 'suppliers_tenant_name_uq', table: 'suppliers', cols: ['tenant_id', 'name'] },
+  { name: 'materials_project_zone_code_uq', table: 'materials', cols: ['project_id', 'zone_id', 'material_code'] },
+  { name: 'generic_sheets_uq', table: 'generic_sheets', cols: ['project_id', 'doc_type', 'source_sheet', 'ordinal'] },
+  { name: 'daily_reports_project_date_uq', table: 'daily_reports', cols: ['project_id', 'report_date'] },
+];
+for (const idx of requiredIndexes) {
+  await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${idx.name} ON ${idx.table} (${idx.cols.join(', ')})`);
+}
+console.log(`✓ Ensured ${requiredIndexes.length} unique indexes for upsert()`);
 
 // Seed default tenant + project for demo
-const tenantExists = db.prepare('SELECT id FROM tenants WHERE code = ?').get('hbg');
+const tenantExists = await db.prepare('SELECT id FROM tenants WHERE code = ?').getAsync('hbg');
 let tenantId;
 if (!tenantExists) {
-  const result = db.prepare('INSERT INTO tenants (code, name) VALUES (?, ?)').run('hbg', 'HBG Construction');
-  tenantId = result.lastInsertRowid;
+  const result = await db.prepare('INSERT INTO tenants (code, name) VALUES (?, ?)').runAsync('hbg', 'HBG Construction');
+  tenantId = Number(result.lastInsertRowid);
   console.log(`✓ Created tenant 'hbg' (id=${tenantId})`);
 } else {
   tenantId = tenantExists.id;
@@ -27,9 +64,9 @@ if (!tenantExists) {
 }
 
 // Seed admin user
-const userExists = db.prepare('SELECT id FROM users WHERE tenant_id = ? AND email = ?').get(tenantId, 'admin@hbg.com');
+const userExists = await db.prepare('SELECT id FROM users WHERE tenant_id = ? AND email = ?').getAsync(tenantId, 'admin@hbg.com');
 if (!userExists) {
-  db.prepare('INSERT INTO users (tenant_id, email, name, role) VALUES (?, ?, ?, ?)').run(tenantId, 'admin@hbg.com', 'Admin HBG', 'admin');
+  await db.prepare('INSERT INTO users (tenant_id, email, name, role) VALUES (?, ?, ?, ?)').runAsync(tenantId, 'admin@hbg.com', 'Admin HBG', 'admin');
   console.log('✓ Created admin user admin@hbg.com');
 }
 
@@ -39,15 +76,15 @@ const projects = [
   { code: 'LAWRENCE-STING-2', name_vi: 'Trường Lawrence Sting 2', name_en: 'LAWRENCE STING SCHOOL 2', package: 'MEP', rev_prefix: 'HBG-LS' },
 ];
 for (const p of projects) {
-  const exists = db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').get(tenantId, p.code);
+  const exists = await db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').getAsync(tenantId, p.code);
   if (!exists) {
-    db.prepare('INSERT INTO projects (tenant_id, code, name_vi, name_en, package, rev_prefix) VALUES (?, ?, ?, ?, ?, ?)').run(tenantId, p.code, p.name_vi, p.name_en, p.package, p.rev_prefix);
+    await db.prepare('INSERT INTO projects (tenant_id, code, name_vi, name_en, package, rev_prefix) VALUES (?, ?, ?, ?, ?, ?)').runAsync(tenantId, p.code, p.name_vi, p.name_en, p.package, p.rev_prefix);
     console.log(`✓ Created project ${p.code}`);
   }
 }
 
 // Seed zones for BTE project
-const bteProject = db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').get(tenantId, 'BTE-WP4-HBC');
+const bteProject = await db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').getAsync(tenantId, 'BTE-WP4-HBC');
 if (bteProject) {
   const zones = [
     { code: 'BOH', name_en: 'Back of House' },
@@ -71,13 +108,13 @@ if (bteProject) {
     { code: 'VNR', name_en: 'Vietnam Residences' },
   ];
   for (const z of zones) {
-    const exists = db.prepare('SELECT id FROM zones WHERE project_id = ? AND code = ?').get(bteProject.id, z.code);
+    const exists = await db.prepare('SELECT id FROM zones WHERE project_id = ? AND code = ?').getAsync(bteProject.id, z.code);
     if (!exists) {
-      db.prepare('INSERT INTO zones (project_id, code, name_en) VALUES (?, ?, ?)').run(bteProject.id, z.code, z.name_en);
+      await db.prepare('INSERT INTO zones (project_id, code, name_en) VALUES (?, ?, ?)').runAsync(bteProject.id, z.code, z.name_en);
     }
   }
   console.log(`✓ Seeded ${zones.length} zones for BTE project`);
 }
 
-closeDb();
-console.log('\n✅ Database ready at backend/data/pmo.db');
+await closeDb();
+console.log(`\n✅ Database ready`);

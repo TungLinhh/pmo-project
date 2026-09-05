@@ -1,5 +1,6 @@
 // API client + auth token management
 const BASE = '/api';
+export const API_BASE = ''; // full URL base (use '' to go via Vite proxy or same-origin)
 
 let _token = localStorage.getItem('pmo_token');
 let _user = (() => { try { return JSON.parse(localStorage.getItem('pmo_user')); } catch { return null; } })();
@@ -26,7 +27,13 @@ export function setToken(t) {
   else localStorage.removeItem('pmo_token');
 }
 
-export function getToken() { return _token; }
+export function getToken() {
+  // Luôn đọc từ localStorage để khôi phục khi reload/F5 (in-memory _token có thể bị mất)
+  if (_token) return _token;
+  const ls = (typeof localStorage !== 'undefined' && localStorage.getItem('pmo_token')) || null;
+  if (ls) { _token = ls; }
+  return _token;
+}
 
 export function getUser() {
   const u = localStorage.getItem('pmo_user');
@@ -91,6 +98,7 @@ export const audit = {
 export const projects = {
   list: () => request('/projects'),
   get: (id) => request(`/projects/${id}`),
+  zones: (id) => request(`/projects/${id}/zones`),
   areaHierarchy: (id) => request(`/projects/${id}/area-hierarchy`),
   scheduleBaselines: (id) => request(`/projects/${id}/schedule-baselines`),
   materialSubmittalsOverdue: (id) => request(`/projects/${id}/material-submittals/overdue`),
@@ -131,6 +139,48 @@ export const construction = {
 export const daily = {
   reports: (projectId) => request(`/projects/${projectId}/daily-reports`),
   get: (id) => request(`/daily-reports/${id}/full`),
+  create: (projectId, data) => request(`/projects/${projectId}/daily-reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  addManpower: (id, data) => request(`/daily-reports/${id}/manpower`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  listPhotos: (id) => request(`/daily-reports/${id}/photos`),
+  uploadPhotos: (id, files) => {
+    const fd = new FormData();
+    for (const f of files) fd.append('photos', f);
+    return fetch(`/api/daily-reports/${id}/photos`, {
+      method: 'POST',
+      headers: { ...authHeaders() },
+      body: fd,
+    }).then(r => r.json());
+  },
+};
+
+export const manpower = {
+  rollup: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request(`/manpower/rollup?${q}`);
+  },
+};
+
+export const otd = {
+  get: (projectId, params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request(`/projects/${projectId}/otd?${q}`);
+  },
+};
+
+export const materialSubmittals = {
+  list: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request(`/material-submittals?${q}`);
+  },
+  pendingSupervisor: (projectId, withinDays = 3) => request(`/projects/${projectId}/material-submittals/pending-supervisor?within_days=${withinDays}`),
+  overdue: (projectId) => request(`/projects/${projectId}/material-submittals/overdue`),
+  submit: (id) => request(`/material-submittals/${id}/submit`, { method: 'POST' }),
+  approve: (id) => request(`/material-submittals/${id}/approve`, { method: 'POST' }),
+  reject: (id, reason) => request(`/material-submittals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  history: (id) => {
+    // History = audit log entries
+    return request(`/audit?resource_type=material_submittal&resource_id=${id}`);
+  },
 };
 
 export const businessProcess = {
@@ -145,6 +195,16 @@ export const uploads = {
     if (projectCode) fd.append('project_code', projectCode);
     return fetch(`${BASE}/upload`, { method: 'POST', body: fd, headers: _token ? { Authorization: `Bearer ${_token}` } : {} }).then(r => r.json());
   },
+  // Mô hình A wizard endpoints
+  wizard: {
+    docTypes: () => request('/upload/doc-types'),
+    configure: (uploadId, body) => request(`/upload/${uploadId}/configure`, { method: 'POST', body }),
+    preview: (uploadId) => request(`/upload/${uploadId}/preview`, { method: 'POST' }),
+    commit: (uploadId) => request(`/upload/${uploadId}/commit`, { method: 'POST' }),
+  },
+  // Project / zone creation
+  createProject: (body) => request('/projects', { method: 'POST', body }),
+  createZone: (projectId, body) => request(`/projects/${projectId}/zones`, { method: 'POST', body }),
 };
 
 export const exportApi = {

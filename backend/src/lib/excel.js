@@ -7,12 +7,15 @@ export function isError(v) {
   return v.error === true || typeof v.w === 'string';
 }
 
+const EXCEL_ERRORS = new Set(['#N/A', '#REF!', '#DIV/0!', '#VALUE!', '#NAME?', '#NULL!', '#NUM!', '#GETTING_DATA']);
+
 export function normalizeCell(v) {
   if (v === null || v === undefined) return null;
   if (typeof v === 'object' && v.error) return null; // #N/A, #REF!
-  if (typeof v === 'string' && v.trim() === '') return null;
-  if (typeof v === 'string' && v === '0' || v === 0) {
-    return typeof v === 'number' ? 0 : '0';
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s === '' || EXCEL_ERRORS.has(s)) return null;
+    return s;
   }
   return v;
 }
@@ -90,6 +93,51 @@ export function readSheet(filePath, sheetName) {
   return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false });
 }
 
+// =====================================================================
+// findDataStart(): find the first row of REAL data, skipping headers
+// and any leading metadata. Replaces brittle dataStart heuristics
+// scattered across ingestors.
+// =====================================================================
+//
+// Usage:
+//   const dataStart = findDataStart(rows, {
+//     headerKeywords: ['mã hiệu', 'tên', 'stt'],  // Vietnamese/English column headers
+//     codeCol: 5,       // column where a unique code/ID should appear
+//     nameCol: 6,       // column where a human name should appear
+//     maxScan: 40,      // max rows to scan
+//   });
+//   for (let r = dataStart; r < rows.length; r++) { ... }
+//
+// Heuristic:
+//   1. Scan up to maxScan rows
+//   2. Skip rows where codeCol is empty OR nameCol is empty
+//   3. Skip rows where codeCol is a header keyword (case-insensitive)
+//   4. Skip rows where codeCol doesn't contain a digit (header text rarely has digits)
+//   5. Return the first row that passes all filters, OR 0 if none found
+// =====================================================================
+export function findDataStart(rows, opts = {}) {
+  const {
+    headerKeywords = ['mã hiệu', 'mã', 'tên', 'name', 'stt', 'tt', 'no', 'no.', 'code', 'reference', 'tham chiếu'],
+    codeCol = 0,
+    nameCol = 1,
+    maxScan = 40,
+  } = opts;
+  if (!Array.isArray(rows)) return 0;
+  for (let i = 0; i < Math.min(maxScan, rows.length); i++) {
+    const row = rows[i] || [];
+    const code = toText(row[codeCol]);
+    const name = toText(row[nameCol]);
+    if (!code) continue;
+    if (nameCol !== null && nameCol !== undefined && !name) continue;
+    const codeLower = code.toLowerCase().trim();
+    if (headerKeywords.some(k => codeLower === k || codeLower.includes(k))) continue;
+    // Most real data codes have at least one digit
+    if (!/\d/.test(code)) continue;
+    return i;
+  }
+  return 0;
+}
+
 export function listSheets(filePath) {
   const wb = XLSX.readFile(filePath, { cellDates: true });
   return wb.SheetNames;
@@ -97,9 +145,11 @@ export function listSheets(filePath) {
 
 // Try to detect doc_type from filename
 // Order matters: more specific patterns first
-// Normalize whitespace and remove double-spaces before matching
+// Normalize whitespace and underscores before matching
 export function detectDocType(filename) {
-  const f = filename.toLowerCase().replace(/\s+/g, ' ').trim();
+  // Replace underscores with spaces, collapse whitespace, strip diacritics for matching
+  const f = filename.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const fNoDiacritics = f.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   // Payment progress FIRST (before generic "tiến độ" match)
   if (f.includes('thanh toán') || f.includes('thanh toan') || f.includes('payment') || f.includes('hstt')) return 'payment_progress';
@@ -109,9 +159,10 @@ export function detectDocType(filename) {
   if (f.includes('thầu phụ') || f.includes('thau phu') || f.includes('tổ đội') || f.includes('to doi')) return 'subcontractor_directory';
 
   // Shop / material / construction
-  if (f.includes('shop ') || f.includes('shop_') || f.startsWith('shop')) return 'shop_drawing';
-  if (f.includes('vật tư') || f.includes('vat tu')) return 'material_supply';
-  if (f.includes('tđ ') || f.includes('td ') || f.includes('tiến độ') || f.includes('tiendo')) return 'construction_schedule';
+  if (f.includes('shop ') || f.startsWith('shop')) return 'shop_drawing';
+  // Material: match "vat tu" in either diacritic or non-diacritic form
+  if (f.includes('vật tư') || f.includes('vat tu') || fNoDiacritics.includes('vat tu')) return 'material_supply';
+  if (f.includes('tđ ') || f.includes('td ') || f.includes('tiến độ') || f.includes('tiendo') || fNoDiacritics.includes('tien do')) return 'construction_schedule';
 
   // Daily report
   if (f.includes('báo cáo công việc') || f.includes('bao cao cong viec') || f.includes('daily')) return 'daily_report';

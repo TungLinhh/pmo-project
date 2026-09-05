@@ -37,7 +37,12 @@ export default function BellDropdown() {
   const load = useCallback(async () => {
     try {
       const d = await api.notifications.list(filter === 'unread');
-      setData(d);
+      // Normalize: backend trả array thẳng, derive counts
+      const items = Array.isArray(d) ? d : (d?.items || []);
+      const unread = items.filter(n => !n.read_at).length;
+      const critical = items.filter(n => n.severity === 'critical' || n.severity === 'CRITICAL').length;
+      const warning = items.filter(n => n.severity === 'warning' || n.severity === 'WARNING').length;
+      setData({ items, counts: { total: items.length, unread, critical, warning } });
     } catch (e) { /* swallow */ }
   }, [filter]);
 

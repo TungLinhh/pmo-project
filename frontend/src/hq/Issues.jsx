@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { projects, issues as issuesApi, getToken } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { toast } from '../components/Toast.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 const SEV_COLORS = {
   CRITICAL: { bg: 'var(--c-critical-bg)', fg: 'var(--c-critical)' },
@@ -75,9 +76,7 @@ export default function Issues() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name_vi}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
         <label>Severity</label>
         <select value={filter.severity} onChange={e => setFilter({ ...filter, severity: e.target.value })}>
           <option value="">All</option>

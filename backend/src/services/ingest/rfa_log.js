@@ -1,54 +1,72 @@
 // Ingestion: RFA Log (file: HBG-MCR-MM-01.xlsx, etc.)
-// Log of Request for Approval / Material Approval submissions
+// PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt, toFloat, toDate } from '../../lib/excel.js';
+import { readSheet, toText, toInt, toDate, findDataStart } from '../../lib/excel.js';
 
-export async function ingestRFALog(filePath, projectId) {
-  const db = getDb();
+const HEADER_KEYWORDS = ['stt', 'tt', 'no', 'no.', 'rfa', 'mcr', 'mã'];
+
+function parseRow(row) {
+  const ordinal = toInt(row[0]);
+  const rfaCode = toText(row[1]) || toText(row[2]);
+  if (!ordinal || !rfaCode) return null;
+  return {
+    ordinal,
+    rfa_code: rfaCode,
+    description_vi: toText(row[3]),
+    date_ma: toDate(row[6]),
+    date_sp: toDate(row[10]),
+    date_pm: toDate(row[10]),
+    date_tp: toDate(row[10]),
+    date_sh: toDate(row[10]),
+    approval_date: toDate(row[12]),
+  };
+}
+
+export async function parse(filePath, projectId) {
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: 'rfa_log', ok: 0, errors: 0, items: [] };
-
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
     const rows = readSheet(filePath, sheetName);
     if (rows.length < 5) continue;
-
-    // Find data start: first row where col[0] is number and col[1] or col[2] has text
-    let dataStart = 0;
-    for (let i = 0; i < Math.min(40, rows.length); i++) {
-      if (toInt(rows[i][0]) && (toText(rows[i][1]) || toText(rows[i][2]))) {
-        dataStart = i;
-        break;
-      }
-    }
-
-    db.prepare('DELETE FROM rfa_log WHERE project_id = ? AND source_sheet = ?').run(projectId, sheetName);
-
-    const insert = db.prepare(`
-      INSERT INTO rfa_log (project_id, source_sheet, ordinal, rfa_code, description_vi, discipline, area,
-        submitted_date, reviewer, reviewer_status, reviewer_comment, response_date, final_status, notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    `);
-
+    const dataStart = findDataStart(rows, { codeCol: 0, nameCol: 1, headerKeywords: HEADER_KEYWORDS, maxScan: 40 });
+    const sheetRows = [];
     for (let r = dataStart; r < rows.length; r++) {
       const row = rows[r] || [];
-      const ordinal = toInt(row[0]);
-      const rfaCode = toText(row[1]) || toText(row[2]);
-      if (!ordinal || !rfaCode) continue;
+      const parsed = parseRow(row);
+      if (parsed) sheetRows.push({ rowIndex: r + 1, ...parsed });
+    }
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, rows: sheetRows });
+  }
+  return { sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
+export async function commit(parsed, projectId) {
+  const db = getDb();
+  const report = { doc_type: 'rfa_log', ok: 0, errors: 0, items: [] };
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
       try {
-        insert.run(
-          projectId, sheetName, ordinal, rfaCode, toText(row[3]), toText(row[4]), toText(row[5]),
-          toDate(row[6]), toText(row[7]), toText(row[8]), toText(row[9]),
-          toDate(row[10]), toText(row[11]), toText(row[12])
+        await db.upsert('rfa_log',
+          { conflictCols: ['project_id', 'rfa_code'] },
+          {
+            project_id: projectId, source_sheet: sheet.sheet,
+            ordinal: row.ordinal, rfa_code: row.rfa_code, description_vi: row.description_vi,
+            date_ma: row.date_ma, date_sp: row.date_sp, date_pm: row.date_pm,
+            date_tp: row.date_tp, date_sh: row.date_sh, approval_date: row.approval_date,
+          }
         );
         report.ok++;
       } catch (e) {
         report.errors++;
-        report.items.push({ sheet: sheetName, row: r + 1, code: rfaCode, error: e.message });
+        report.items.push({ sheet: sheet.sheet, code: row.rfa_code, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestRFALog(filePath, projectId) {
+  const parsed = await parse(filePath, projectId);
+  return await commit(parsed, projectId);
 }

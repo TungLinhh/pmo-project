@@ -36,7 +36,7 @@ const ROUTE_MODULE_MAP = [
   { method: 'PUT', pattern: /^\/api\/payment-requests/, module: 'payment', action: 'write' },
 ];
 
-export function permissionMiddleware(req, res, next) {
+export async function permissionMiddleware(req, res, next) {
   // Skip non-API and read-only health checks
   if (!req.path.startsWith('/api/')) return next();
   if (req.path === '/api/auth/login' || req.path === '/api/health' || req.path.startsWith('/api/me/permissions')) return next();
@@ -48,7 +48,7 @@ export function permissionMiddleware(req, res, next) {
 
   // Get user role from DB to bypass ROLE_MAP (admin stays ADMIN)
   const db = getDb();
-  const u = db.prepare('SELECT role FROM users WHERE id = ?').get(req.session.user_id);
+  const u = await db.prepare('SELECT role FROM users WHERE id = ?').getAsync(req.session.user_id);
   const role = u?.role === 'admin' ? 'ADMIN' : (req.session.role || 'PMO').toUpperCase();
   if (FULL_ACCESS_ROLES.includes(role)) return next();
 

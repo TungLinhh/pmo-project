@@ -16,15 +16,20 @@ import ShopList from './hq/ShopList.jsx';
 import Materials from './hq/Materials.jsx';
 import { Manpower } from './hq/Placeholders.jsx';
 import Payment from './hq/Payment.jsx';
+import OTDPage from './hq/OTDPage.jsx';
+import OTDPage_css from './hq/OTDPage.css?inline';
 import { ICON } from './icons.jsx';
 import FieldHome from './field/FieldHome.jsx';
 import DailyProgress from './field/DailyProgress.jsx';
+import DailyReportForm from './components/DailyReportForm.jsx';
+import DailyReportForm_css from './components/DailyReportForm.css?inline';
 import { FieldMaterial, FieldManpower, FieldIssue, FieldReview, FieldSync, ProjectWbsSelection } from './field/FieldStubs.jsx';
 import MasterDataList from './governance/MasterDataList.jsx';
 import MasterDataEdit from './governance/MasterDataEdit.jsx';
 import Approval from './governance/Approval.jsx';
 import AuditLog from './governance/AuditLog.jsx';
 import { getToken, projects as api } from './api/index.js';
+import UploadWizard from './components/UploadWizard.jsx';
 
 function Protected({ children, role }) {
   const t = getToken();
@@ -64,9 +69,12 @@ function ProjectsList() {
 export default function App() {
   return (
     <ConfirmProvider>
+    <style>{OTDPage_css}</style>
+    <style>{DailyReportForm_css}</style>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/upload" element={<UploadPage />} />
         <Route path="/field/login" element={<Login />} />
 
         {/* HQ shell */}
@@ -86,6 +94,7 @@ export default function App() {
           <Route path="master-data/edit" element={<MasterDataEdit />} />
           <Route path="approval" element={<Approval />} />
           <Route path="audit" element={<AuditLog />} />
+          <Route path="otd" element={<OTDPage />} />
         </Route>
 
         {/* Field shell */}
@@ -94,6 +103,7 @@ export default function App() {
           <Route path="home" element={<FieldHome />} />
           <Route path="wbs" element={<ProjectWbsSelection />} />
           <Route path="daily-progress" element={<DailyProgress />} />
+          <Route path="daily-report" element={<DailyReportForm />} />
           <Route path="material" element={<FieldMaterial />} />
           <Route path="manpower" element={<FieldManpower />} />
           <Route path="issue" element={<FieldIssue />} />
@@ -107,5 +117,13 @@ export default function App() {
     </BrowserRouter>
     <ToastContainer />
     </ConfirmProvider>
+  );
+}
+
+function UploadPage() {
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--c-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <UploadWizard open={true} onClose={() => window.history.back()} onDone={() => window.location.href = '/hq/projects'} />
+    </div>
   );
 }

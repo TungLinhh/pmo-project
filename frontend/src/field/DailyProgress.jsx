@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projects, construction } from '../api/index.js';
 import { ICON } from '../icons.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 export default function DailyProgress() {
   const nav = useNavigate();
@@ -45,9 +46,7 @@ export default function DailyProgress() {
         <h2>New Daily Progress</h2>
 
         <label className="field-label">Dự án</label>
-        <select className="field-input" value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name_vi}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
 
         <label className="field-label">Zone</label>
         <select className="field-input" value={zone} onChange={e => setZone(e.target.value)}>

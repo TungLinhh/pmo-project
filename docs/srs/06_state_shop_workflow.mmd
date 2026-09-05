@@ -1,0 +1,26 @@
+stateDiagram-v2
+  [*] --> DRAFT: Tạo mới / Upload
+
+  DRAFT --> SUBMITTED: PM gửi duyệt
+  SUBMITTED --> REVIEW: BQL mở review
+  REVIEW --> APPROVED: BQL phê duyệt
+  REVIEW --> REJECTED: BQL từ chối (lý do)
+
+  REJECTED --> DRAFT: PM revert về nháp<br/>(yêu cầu reason)
+
+  DRAFT --> CANCELLED: PM hủy
+  REJECTED --> CANCELLED: PM hủy
+
+  APPROVED --> [*]
+  CANCELLED --> [*]
+
+  note right of REVIEW
+    4 mốc phản hồi BQL (L1-L4)
+    Mỗi mốc: response (Y/N) +
+    comment + date
+  end note
+
+  note right of REJECTED
+    Phải có rejection_reason
+    Ghi audit_log
+  end note

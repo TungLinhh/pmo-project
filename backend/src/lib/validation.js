@@ -61,8 +61,14 @@ export function computeSlaDeadline(submittedDate, slaDays = 7) {
   return d.toISOString().slice(0, 10);
 }
 
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.4) — check overdue
+// Check SLA overdue: sla_deadline hoặc supervisor_deadline
 export function isSlaOverdue(deadline, status) {
+  if (!deadline || status === 'APPROVED' || status === 'CLOSED') return false;
+  return new Date(deadline) < new Date();
+}
+
+// Check TVGS overdue (riêng cho supervisor_deadline)
+export function isSupervisorOverdue(deadline, status) {
   if (!deadline || status === 'APPROVED' || status === 'CLOSED') return false;
   return new Date(deadline) < new Date();
 }

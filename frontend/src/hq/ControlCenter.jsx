@@ -8,6 +8,7 @@ import { HEALTH, HEALTH_COLORS } from '../constants.js';
 import PieChart from '../components/PieChart.jsx';
 import PieTooltip from '../components/PieTooltip.jsx';
 import { toast } from '../components/Toast.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 // Helper: get date range from period value
 function getDateRange(period, customFrom, customTo) {
@@ -312,10 +313,11 @@ export default function ProjectControlCenter() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          <option value="">Tất cả dự án</option>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name_vi}</option>)}
-        </select>
+        <ProjectPicker
+          value={selectedProject}
+          onChange={setSelectedProject}
+          allowAll
+        />
         <label>Period</label>
         <select value={period} onChange={e => setPeriod(e.target.value)}>
           <option value="today">Today</option>

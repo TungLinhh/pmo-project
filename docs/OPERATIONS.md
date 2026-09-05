@@ -229,6 +229,95 @@ import('./db/index.js').then(async (m) => {
 
 ## 🔧 Common fixes
 
+### PostgreSQL management (PMO uses PG, not SQLite as in older docs)
+
+> **Last updated:** 2026-09-04 — PG data dir moved into project: `data/pgdata/`
+
+**Location:**
+- Data dir: `<project>/data/pgdata/` (66MB+)
+- Log file: `<project>/data/pgdata/pg.log`
+- Binary: `/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/`
+- Port: 5433 (5432 conflict with WSL2 port forward)
+- User: `pmo_user` / pw: `pmo_dev_pwd` / db: `pmo`
+- Connection: `postgresql://pmo_user:***@127.0.0.1:5433/pmo`
+
+**Use the helper script (instead of `pg_ctl` directly):**
+```bash
+./backend/scripts/pg-ctl.sh start        # Start PG
+./backend/scripts/pg-ctl.sh stop         # Stop PG
+./backend/scripts/pg-ctl.sh restart      # Restart
+./backend/scripts/pg-ctl.sh status       # Check status
+./backend/scripts/pg-ctl.sh logs         # Tail log
+./backend/scripts/pg-ctl.sh backup       # Backup to ./backup-YYYYMMDD-HHMMSS.sql
+./backend/scripts/pg-ctl.sh psql -c "SELECT 1"   # Run SQL
+```
+
+**Manual commands (if script unavailable):**
+```bash
+# Start
+/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/pg_ctl \
+  -D /home/vutun/pmo_project/data/pgdata \
+  -l /home/vutun/pmo_project/data/pgdata/pg.log \
+  -o "-p 5433" start
+
+# Check ready
+/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/pg_isready -h 127.0.0.1 -p 5433
+
+# Stop
+.../pg_ctl -D .../data/pgdata -m fast stop
+
+# Backup
+PGPASSWORD=pmo_dev_pwd .../pg_dump -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -F c -f backup.sql
+
+# Restore
+PGPASSWORD=pmo_dev_pwd .../pg_dropdb -h 127.0.0.1 -p 5433 -U pmo_user pmo
+PGPASSWORD=pmo_dev_pwd .../pg_createdb -h 127.0.0.1 -p 5433 -U pmo_user -O pmo_user pmo
+PGPASSWORD=pmo_dev_pwd .../pg_restore -h 127.0.0.1 -p 5433 -U pmo_user -d pmo backup.sql
+```
+
+**Why port 5433 not 5432?**
+WSL2 → Windows port forwarding silently fails on 5432. PG runs on 5433 to avoid the conflict. The connection string in `backend/.env` is pre-configured.
+
+**Schema patches (run after fresh DB init):**
+```bash
+# 1. Drizzle migrations (creates 40+ tables)
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -f backend/drizzle/0000_naive_nick_fury.sql
+
+# 2. Schema alignment (add columns used by route code)
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -f backend/drizzle/9998_align_schema_with_routes.sql
+
+# 3. New tables (issues, directives)
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -f backend/drizzle/9999_add_issues_table.sql
+```
+
+**Backup to remote (B2, S3, etc.):**
+```bash
+# 1. Local backup
+./backend/scripts/pg-ctl.sh backup /tmp/backup.sql
+
+# 2. Upload (rclone example)
+rclone copy /tmp/backup.sql b2:pmo-backups/$(date +%Y%m%d)/
+
+# 3. Clean up
+rm /tmp/backup.sql
+```
+
+**Migrating PG to a new machine:**
+```bash
+# On OLD machine
+./backend/scripts/pg-ctl.sh stop
+tar czf pgdata.tar.gz -C pmo_project/data/pgdata .
+
+# Copy pgdata.tar.gz to NEW machine
+# On NEW machine
+cd pmo_project
+tar xzf pgdata.tar.gz
+# Install postgresql@16 via homebrew
+brew install postgresql@16
+# Start
+./backend/scripts/pg-ctl.sh start
+```
+
 ### App is slow
 ```bash
 # 1. Check DB size

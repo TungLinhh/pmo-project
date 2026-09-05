@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { projects, shop as shopApi, exportApi } from '../api/index.js';
 import { getToken } from '../api/index.js';
 import { ICON } from '../icons.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 export default function ShopList() {
   const [params] = useSearchParams();
@@ -66,9 +67,7 @@ export default function ShopList() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
         <input placeholder="Search code / name..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
       </div>
 

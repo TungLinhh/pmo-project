@@ -1,139 +1,111 @@
-// Ingest a "tổng thể" file by reading each sheet as a separate zone
-// Strategy: each sheet has a name like "TĐ BPV-1BR" or "TĐ KID CLUB" → extract zone from sheet name
-// File structure (per sheet):
-//   Row 12 (0-idx): header
-//   Row 18+: parent rows (row[3]="I." or "II."), child rows (row[3]=1,2,3...)
-//   Cols: 3=Stt, 4=% hạng mục, 5=Hạng mục, 6=Khu vực, 7=% chi tiết, 8=% thi công, 9=% hoàn thành
+// Ingest a "tổng thể" file (multi-zone summary). PG-only. Mô hình A wizard.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt, toFloat, toDate } from '../../lib/excel.js';
+import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
 import { findZoneByName } from '../../lib/zone_matcher.js';
+import { findOrCreateZone } from './index.js';
 
-export async function ingestProjectLevel(filePath, projectId, options = {}) {
+const HEADER_KEYWORDS = ['stt', 'tt', 'hạng mục', 'nội dung', 'tiến độ', 'khu vực'];
+
+function parseSheetRows(rows, dataStart, docType) {
+  const out = [];
+  for (let r = dataStart; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (docType === 'shop_drawing') {
+      const code = toText(row[5]) || toText(row[1]);
+      const name = toText(row[6]) || toText(row[2]);
+      if (!code && !name) continue;
+      if (code && /^[0-9.]+$/.test(code)) continue;
+      out.push({ drawing_code: code, name_vi: name, progress_pct: toFloat(row[7]) || toFloat(row[3]) });
+    } else if (docType === 'material_supply') {
+      const code = toText(row[5]) || toText(row[1]);
+      const name = toText(row[6]) || toText(row[2]);
+      if (!code && !name) continue;
+      if (code && /^[0-9.]+$/.test(code)) continue;
+      out.push({ material_code: code, name_vi: name, progress_pct: toFloat(row[7]) || toFloat(row[3]), request_date_1: toDate(row[8]) || toDate(row[4]) });
+    } else {
+      // construction_schedule
+      const stt = toText(row[3]) || toText(row[0]);
+      const name = toText(row[5]) || toText(row[4]);
+      if (!stt && !name) continue;
+      if (name && /^[0-9.]+$/.test(name)) continue;
+      if (stt && /^(Stt|Hạng|%)\b/i.test(stt)) continue;
+      const romanMatch = stt.match(/^([IVX]+)\.?$/);
+      const romanMap = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
+      out.push({
+        ordinal: romanMatch ? romanMap[romanMatch[1]] : toInt(stt),
+        name_vi: name || stt,
+        progress_pct: toFloat(row[9]) || toFloat(row[8]) || toFloat(row[7]) || toFloat(row[2]),
+        plan_start_date: toDate(row[6]) || toDate(row[3]),
+        plan_end_date: toDate(row[10]) || toDate(row[7]),
+      });
+    }
+  }
+  return out;
+}
+
+export async function parse(filePath, projectId, options = {}) {
   const db = getDb();
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: options.docType, ok: 0, errors: 0, items: [], zone_splits: {} };
-
-  const zones = db.prepare('SELECT id, code FROM zones WHERE project_id = ?').all(projectId);
-
+  const zones = await db.prepare('SELECT id, code FROM zones WHERE project_id = ?').allAsync(projectId);
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
-    // Skip non-data sheets (e.g. "SƠ đồ tông thể thi công", "Index")
     if (sheetName.toLowerCase().includes('sơ đồ') || sheetName.toLowerCase().includes('index')) continue;
-
-    // Try to extract zone from sheet name
-    // Patterns: "TĐ BPV-1BR", "TĐ KID CLUB", "Shop BOH", "Vật tư BOH"
     const m = sheetName.match(/(?:TĐ|Shop|Vật tư)\s+(.+)/i);
     if (!m) continue;
     const zoneName = m[1].trim();
-    const zoneId = findZoneByName(zoneName, zones);
+    let zoneId = findZoneByName(zoneName, zones);
+    let zoneAutoCreated = false;
     if (!zoneId) {
-      report.errors++;
-      report.items.push({ sheet: sheetName, error: `Zone '${zoneName}' not found` });
-      continue;
+      const created = await findOrCreateZone(projectId, zoneName.toUpperCase().replace(/\s+/g, ''), zoneName);
+      zoneId = created.id;
+      zones.push({ id: created.id, code: created.code });
+      zoneAutoCreated = true;
     }
-
     const rows = readSheet(filePath, sheetName);
-    // Find data start: first row where Stt col[3] is non-empty
-    let dataStart = 0;
-    for (let i = 0; i < Math.min(30, rows.length); i++) {
-      const stt = toText(rows[i]?.[3]) || toText(rows[i]?.[0]);
-      if (stt && stt.trim()) { dataStart = i; break; }
-    }
+    const dataStart = findDataStart(rows, { codeCol: 3, nameCol: 5, headerKeywords: HEADER_KEYWORDS, maxScan: 30 });
+    const sheetRows = parseSheetRows(rows, dataStart, options.docType);
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, zone_id: zoneId, zone_name: zoneName, zone_auto_created: zoneAutoCreated, rows: sheetRows });
+  }
+  return { docType: options.docType, sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
-    if (options.docType === 'shop_drawing') {
-      db.prepare('DELETE FROM shop_drawings WHERE project_id = ? AND zone_id = ? AND source_sheet = ?').run(projectId, zoneId, sheetName);
-      const insert = db.prepare(`
-        INSERT INTO shop_drawings (project_id, zone_id, source_sheet, drawing_code, name_vi, progress_pct)
-        VALUES (?,?,?,?,?,?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const code = toText(row[5]) || toText(row[1]);
-        const name = toText(row[6]) || toText(row[2]);
-        if (!code && !name) continue;
-        // Skip if code looks like a number (likely progress %)
-        if (code && /^[0-9.]+$/.test(code)) continue;
-        try {
-          insert.run(projectId, zoneId, sheetName, code, name, toFloat(row[7]) || toFloat(row[3]));
-          report.ok++;
-          report.zone_splits[zoneName] = (report.zone_splits[zoneName] || 0) + 1;
-        } catch (e) { report.errors++; }
-      }
-    } else if (options.docType === 'material_supply') {
-      db.prepare('DELETE FROM materials WHERE project_id = ? AND zone_id = ? AND source_sheet = ?').run(projectId, zoneId, sheetName);
-      const insert = db.prepare(`
-        INSERT INTO materials (project_id, zone_id, source_sheet, material_code, name_vi, progress_pct, request_date_1)
-        VALUES (?,?,?,?,?,?,?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const code = toText(row[5]) || toText(row[1]);
-        const name = toText(row[6]) || toText(row[2]);
-        if (!code && !name) continue;
-        if (code && /^[0-9.]+$/.test(code)) continue;
-        try {
-          insert.run(projectId, zoneId, sheetName, code, name, toFloat(row[7]) || toFloat(row[3]), toDate(row[8]) || toDate(row[4]));
-          report.ok++;
-          report.zone_splits[zoneName] = (report.zone_splits[zoneName] || 0) + 1;
-        } catch (e) { report.errors++; }
-      }
-    } else if (options.docType === 'construction_schedule') {
-      // File structure: Stt(3), %(4), Hạng mục(5), Khu vực(6), % chi tiết(7), % thi công(8), % hoàn thành(9)
-      // Parent rows: Stt = "I.", "II.", "III." (roman)
-      // Child rows: Stt = 1, 2, 3 (number)
-      db.prepare('DELETE FROM construction_schedule_items WHERE project_id = ? AND zone_id = ? AND source_sheet = ?').run(projectId, zoneId, sheetName);
-      const insert = db.prepare(`
-        INSERT INTO construction_schedule_items (project_id, zone_id, source_sheet, name_vi, progress_pct, plan_start_date, plan_end_date, ordinal)
-        VALUES (?,?,?,?,?,?,?,?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const stt = toText(row[3]) || toText(row[0]);
-        const name = toText(row[5]) || toText(row[4]);
-        // Skip empty rows
-        if (!stt && !name) continue;
-        // Skip if name is a number (likely %)
-        if (name && /^[0-9.]+$/.test(name)) continue;
-        // Skip if Stt is header text
-        if (stt && /^(Stt|Hạng|%)\b/i.test(stt)) continue;
-        // Detect ordinal: "I." → 1, "II." → 2, "1" → 1, etc.
-        let ordinal = null;
-        const romanMatch = stt.match(/^([IVX]+)\.?$/);
-        if (romanMatch) {
-          const roman = romanMatch[1];
-          const romanMap = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
-          ordinal = romanMap[roman] || null;
+export async function commit(parsed, projectId) {
+  const db = getDb();
+  const docType = parsed.docType;
+  const report = { doc_type: docType, ok: 0, errors: 0, items: [], zone_splits: {} };
+
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
+      try {
+        if (docType === 'shop_drawing') {
+          await db.upsert('shop_drawings',
+            { conflictCols: ['project_id', 'drawing_code'] },
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, drawing_code: row.drawing_code, name_vi: row.name_vi, progress_pct: row.progress_pct }
+          );
+        } else if (docType === 'material_supply') {
+          await db.upsert('materials',
+            { conflictCols: ['project_id', 'zone_id', 'material_code'] },
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, material_code: row.material_code, name_vi: row.name_vi, progress_pct: row.progress_pct, request_date_1: row.request_date_1 }
+          );
         } else {
-          ordinal = toInt(stt);
+          await db.upsert('construction_schedule_items',
+            { conflictCols: ['project_id', 'zone_id', 'source_sheet', 'ordinal'] },
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, ordinal: row.ordinal, name_vi: row.name_vi, progress_pct: row.progress_pct, plan_start_date: row.plan_start_date, plan_end_date: row.plan_end_date }
+          );
         }
-        try {
-          insert.run(projectId, zoneId, sheetName, name || stt, toFloat(row[9]) || toFloat(row[8]) || toFloat(row[7]) || toFloat(row[2]),
-            toDate(row[6]) || toDate(row[3]), toDate(row[10]) || toDate(row[7]), ordinal);
-          report.ok++;
-          report.zone_splits[zoneName] = (report.zone_splits[zoneName] || 0) + 1;
-        } catch (e) {
-          report.errors++;
-          report.items.push({ sheet: sheetName, row: r, error: e.message });
-        }
-      }
-    } else {
-      // Generic
-      const insert = db.prepare(`
-        INSERT OR REPLACE INTO generic_sheets (project_id, doc_type, source_sheet, zone_id, ordinal, col_1, col_2, col_3, col_4, col_5)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const ordinal = toInt(row[0]);
-        if (!ordinal) continue;
-        try {
-          insert.run(projectId, options.docType, sheetName, zoneId, ordinal,
-            toText(row[1]), toText(row[2]), toText(row[3]), toText(row[4]), toText(row[5]));
-          report.ok++;
-        } catch (e) { report.errors++; }
+        report.ok++;
+        report.zone_splits[sheet.zone_name] = (report.zone_splits[sheet.zone_name] || 0) + 1;
+      } catch (e) {
+        report.errors++;
+        report.items.push({ sheet: sheet.sheet, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestProjectLevel(filePath, projectId, options = {}) {
+  const parsed = await parse(filePath, projectId, options);
+  return await commit(parsed, projectId);
 }

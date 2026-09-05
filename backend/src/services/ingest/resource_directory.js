@@ -1,61 +1,72 @@
 // Ingestion: Resource Directory (file: Danh sách nguồn lực công ty.xlsx)
-// Uses legacy schema: subcontractors (tenant-level) + suppliers (tenant-level)
+// PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt } from '../../lib/excel.js';
+import { readSheet, toText, toInt, findDataStart } from '../../lib/excel.js';
 
-export async function ingestResourceDirectory(filePath, tenantId) {
-  const db = getDb();
+const HEADER_KEYWORDS = ['stt', 'tt', 'no', 'no.'];
+
+function isSupplierSheet(name) {
+  const n = name.toLowerCase();
+  return n.includes('cung cấp') || n.includes('ncc') || n.includes('supplier');
+}
+
+function parseSupplierRow(row) {
+  const name = toText(row[1]);
+  if (!name) return null;
+  return { type: 'supplier', name, system: toText(row[2]), category: toText(row[3]), contact: toText(row[4]) };
+}
+function parseSubRow(row) {
+  const name = toText(row[1]);
+  if (!name) return null;
+  return { type: 'subcontractor', name, capability_summary: toText(row[2]) };
+}
+
+export async function parse(filePath, tenantId) {
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: 'resource_directory', ok: 0, errors: 0, items: [] };
-
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
     const rows = readSheet(filePath, sheetName);
-    const isSupplier = sheetName.toLowerCase().includes('cung cấp') || sheetName.toLowerCase().includes('ncc');
+    const dataStart = findDataStart(rows, { codeCol: 0, nameCol: 1, headerKeywords: HEADER_KEYWORDS, maxScan: 20 });
+    const sheetRows = [];
+    const isSup = isSupplierSheet(sheetName);
+    for (let r = dataStart; r < rows.length; r++) {
+      const parsed = isSup ? parseSupplierRow(rows[r] || []) : parseSubRow(rows[r] || []);
+      if (parsed) sheetRows.push({ rowIndex: r + 1, ...parsed });
+    }
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, rows: sheetRows });
+  }
+  return { sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
-    let dataStart = 1;
-    if (toInt(rows[0]?.[0]) && toText(rows[0]?.[1])) dataStart = 0;
-
-    if (isSupplier) {
-      const insert = db.prepare(`
-        INSERT OR REPLACE INTO suppliers (tenant_id, name, system, category, past_projects, location, price_rating, quality_rating, warranty_rating)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const ordinal = toInt(row[0]);
-        const name = toText(row[1]);
-        if (!name) continue;
-        try {
-          insert.run(tenantId, name, toText(row[2]), toText(row[3]), toText(row[4]), toText(row[5]),
-            toText(row[6]), toText(row[7]), toText(row[8]));
-          report.ok++;
-        } catch (e) {
-          report.errors++;
-          report.items.push({ sheet: sheetName, row: r + 1, name, error: e.message });
+export async function commit(parsed, tenantId) {
+  const db = getDb();
+  const report = { doc_type: 'resource_directory', ok: 0, errors: 0, items: [] };
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
+      try {
+        if (row.type === 'supplier') {
+          await db.upsert('suppliers',
+            { conflictCols: ['tenant_id', 'name'] },
+            { tenant_id: tenantId, name: row.name, system: row.system, category: row.category, contact: row.contact, status: 'ACTIVE', source_sheet: sheet.sheet }
+          );
+        } else {
+          await db.upsert('subcontractors',
+            { conflictCols: ['tenant_id', 'name'] },
+            { tenant_id: tenantId, name: row.name, capability_summary: row.capability_summary, status: 'ACTIVE', is_internal_team: false }
+          );
         }
-      }
-    } else {
-      // Subcontractors / teams
-      const insert = db.prepare(`
-        INSERT OR REPLACE INTO subcontractors (tenant_id, name, capability_summary, status, is_internal_team)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      for (let r = dataStart; r < rows.length; r++) {
-        const row = rows[r] || [];
-        const ordinal = toInt(row[0]);
-        const name = toText(row[1]);
-        if (!name) continue;
-        try {
-          insert.run(tenantId, name, toText(row[2]), 'ACTIVE', 0);
-          report.ok++;
-        } catch (e) {
-          report.errors++;
-          report.items.push({ sheet: sheetName, row: r + 1, name, error: e.message });
-        }
+        report.ok++;
+      } catch (e) {
+        report.errors++;
+        report.items.push({ sheet: sheet.sheet, name: row.name, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestResourceDirectory(filePath, tenantId) {
+  const parsed = await parse(filePath, tenantId);
+  return await commit(parsed, tenantId);
 }

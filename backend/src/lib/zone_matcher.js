@@ -23,10 +23,17 @@ const ZONE_ALIASES = {
 
 export function findZoneByName(name, zones) {
   if (!name) return null;
-  const n = name.toLowerCase().trim()
+  const rawLower = name.toLowerCase().trim();
+
+  // 1. Try EXACT match (case-insensitive) first — preserves dashes like "TST-A", "BPV-1BR"
+  const exact = zones.find(z => z.code.toLowerCase() === rawLower);
+  if (exact) return exact.id;
+
+  // 2. Normalize for alias matching
+  const n = rawLower
     .replace(/\s*&\s*/g, '-')
     .replace(/\s+/g, ' ')
-    .replace(/-/g, ' ');  // normalize - and space to single space
+    .replace(/-/g, ' ');  // for alias lookup, spaces and dashes are equivalent
 
   // Try alias
   const alias = ZONE_ALIASES[n] || ZONE_ALIASES[n.replace(/\s+/g, '')];
@@ -35,11 +42,11 @@ export function findZoneByName(name, zones) {
     if (z) return z.id;
   }
 
-  // Try direct match
+  // 3. Try direct match
   const direct = zones.find(z => z.code.toLowerCase() === name.toLowerCase().trim());
   if (direct) return direct.id;
 
-  // Try partial
+  // 4. Try partial
   for (const z of zones) {
     const code = z.code.toLowerCase();
     if (n.includes(code) || code.includes(n)) return z.id;

@@ -1,67 +1,80 @@
-// Simple auth MVP - uses minimal users table from schema
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) — hard-coded passwords cho demo
-//   Khi có password_hash column sẽ migrate sang bcrypt.
-import { getDb } from '../db/index.js';
-import { createHash, randomBytes } from 'node:crypto';
+// Auth middleware
+// Sử dụng:
+//   router.get('/api/foo', requireAuth, handler)        — bắt buộc đăng nhập
+//   router.get('/api/foo', requireAuth, requireRole('admin', 'ceo'), handler)  — yêu cầu role
+//
+// req.session được set bởi /api/auth/login (in-memory, key: sessionId → user)
+// Phase 2: chuyển sang JWT + PG session
 
-// Passwords cho 7 demo accounts (mục 43.2 — 6 role cố định + admin)
-const PASSWORDS = new Map([
-  ['admin@hbg.com', 'admin123'],
-  ['ceo@hbg.com', 'ceo123'],
-  ['pm@hbg.com', 'pm123'],
-  ['pmo@hbg.com', 'pmo123'],
-  ['site@hbg.com', 'site123'],
-  ['procurement@hbg.com', 'proc123'],
-  ['accounting@hbg.com', 'acc123'],
-]);
+const SESSIONS = new Map(); // sessionId → user
+let _sessionId = 0;
 
-const SESSIONS = new Map();
-
-function loadUser(email) {
-  const db = getDb();
-  const u = db.prepare('SELECT id, tenant_id, email, name, role, is_ceo FROM users WHERE email = ?').get(email);
-  if (!u) return null;
-  return {
-    id: u.id, email: u.email,
-    full_name: u.name, role: u.role, is_ceo: u.is_ceo,
-    tenant_id: u.tenant_id,
-  };
+export function createSession(user) {
+  const id = `s_${++_sessionId}_${Date.now()}`;
+  SESSIONS.set(id, user);
+  return id;
 }
 
-export function listUsers() {
-  const db = getDb();
-  return db.prepare('SELECT id, email, name as full_name, role, is_ceo, tenant_id FROM users').all();
+export function destroySession(id) {
+  return SESSIONS.delete(id);
 }
 
-export function login(email, password) {
-  const expected = PASSWORDS.get(email);
-  if (!expected || expected !== password) return null;
-  const user = loadUser(email);
-  if (!user) return null;
-  const token = randomBytes(16).toString('hex');
-  const session = { token, user_id: user.id, ...user };
-  SESSIONS.set(token, session);
-  return { token, user };
+export function getSessionUser(id) {
+  return SESSIONS.get(id) || null;
 }
 
-export function getSession(token) {
-  return token ? SESSIONS.get(token) : null;
+export function listSessions() {
+  return SESSIONS.size;
 }
 
-export function logout(token) {
-  SESSIONS.delete(token);
+// Read user from Authorization: Bearer <token>
+export function readTokenUser(req) {
+  const auth = req.headers?.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) return null;
+  const token = auth.slice(7);
+  // Token = sessionId (simple) or JWT (future)
+  return SESSIONS.get(token) || null;
 }
 
+// requireAuth: 401 nếu chưa đăng nhập
 export function requireAuth(req, res, next) {
-  // Skip auth for login + health + static (frontend) paths
-  const p = req.path;
-  if (p === '/api/auth/login' || p === '/api/health' || !p.startsWith('/api/')) return next();
-  const h = req.headers.authorization || '';
-  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-  const session = getSession(token);
-  if (!session) return res.status(401).json({ error: 'Unauthorized' });
-  req.session = session;
+  const user = readTokenUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Unauthorized. Đăng nhập để tiếp tục.' });
+  }
+  req.user = user;
+  // Backward-compat: set req.session.* (deprecated, dùng req.user.* thay)
+  req.session = req.session || {};
+  req.session.user_id = user.id;
+  req.session.user_name = user.name;
+  req.session.role = user.role;
   next();
 }
 
-export const authMiddleware = requireAuth;
+// requireRole(...roles): 403 nếu không đúng role
+export function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    if (roles.length && !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: `Forbidden. Cần role: ${roles.join('|')}` });
+    }
+    next();
+  };
+}
+
+// Helper: lấy user hiện tại (dùng trong route, optional)
+export function currentUser(req) {
+  if (req.user) {
+    return {
+      id: req.user.id,
+      name: req.user.name || req.user.full_name || 'System',
+      role: req.user.role || 'admin',
+    };
+  }
+  // Fallback khi không có auth (edge case, chỉ dùng trong test/internal)
+  return {
+    id: req.session?.user_id || 1,
+    name: req.session?.user_name || 'System',
+    role: req.session?.role || 'admin',
+  };
+}

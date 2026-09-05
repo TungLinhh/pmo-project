@@ -1,0 +1,49 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pmo_user
+          POSTGRES_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          POSTGRES_DB: pmo
+        ports: ['5432:5432']
+    env:
+      DATABASE_URL: postgresql://pmo_user:${{ secrets.PG_PASSWORD }}@127.0.0.1:5432/pmo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend
+        run: cd backend && npm ci --omit=dev
+      - name: Install frontend
+        run: cd frontend && npm ci
+      - name: Build frontend
+        run: cd frontend && npm run build
+      - name: Apply migrations
+        run: PGPASSWORD=${{ secrets.PG_PASSWORD }} psql -h 127.0.0.1 -U pmo_user -d pmo -f backend/drizzle/9998_align_schema_with_routes.sql
+      - name: Restart service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            cd /opt/pmo_project
+            git pull origin main
+            cd backend && npm ci --omit=dev
+            cd ../frontend && npm ci && npm run build
+            sudo systemctl restart pmo-backend
+            sleep 3
+            curl -fsS http://localhost:3000/api/health

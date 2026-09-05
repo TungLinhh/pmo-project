@@ -1,4 +1,12 @@
-// Ingestion router - dispatches by doc_type
+// Ingestion router — dispatches by doc_type
+// Each ingestor now exposes parse() (read file → rows) and commit() (rows → DB).
+// ingest() is a backward-compatible wrapper that calls parse() then commit().
+//
+// Wizard flow (Mô hình A):
+//   1. POST /api/upload         → upload file, returns upload_id
+//   2. POST /api/upload/:id/configure → set project_id, zone_id, doc_type
+//   3. POST /api/upload/:id/preview   → returns parsed rows (no DB writes)
+//   4. POST /api/upload/:id/commit    → actually inserts the rows
 import { ingestDailyReport } from './daily_report.js';
 import { ingestBusinessProcess } from './business_process.js';
 import { ingestShopDrawing } from './shop_drawing.js';
@@ -11,51 +19,106 @@ import { ingestGenericTabular } from './generic_tabular.js';
 import { ingestProjectLevel } from './project_level.js';
 import { getDb } from '../../db/index.js';
 
-const GENERIC_TYPES = new Set(['manpower_master_plan', 'shop_master', 'work_management', 'other_approved', 'file_index', 'zone_map']);
+const GENERIC_TYPES = new Set(['manpower_master_plan', 'shop_master', 'work_management', 'other_approved', 'file_index', 'zone_map', 'payment_progress']);
 const PROJECT_LEVEL_TYPES = new Set(['construction_schedule', 'shop_drawing', 'material_supply']);
 
-export async function ingest(filePath, docType, opts) {
-  switch (docType) {
-    case 'daily_report':
-      return await ingestDailyReport(filePath, opts.projectId);
-    case 'business_process':
-      return await ingestBusinessProcess(filePath, opts.tenantId, opts.processCode || 'project_execution');
-    case 'shop_drawing':
-      return await ingestShopDrawing(filePath, opts.projectId, opts.zoneCode);
-    case 'construction_schedule':
-      return await ingestConstructionSchedule(filePath, opts.projectId, opts.zoneCode);
-    case 'material_supply':
-      return await ingestMaterialSupply(filePath, opts.projectId, opts.zoneCode);
-    case 'subcontractor_directory':
-      return await ingestSubcontractorDirectory(filePath, opts.projectId);
-    case 'resource_directory':
-      return await ingestResourceDirectory(filePath, opts.tenantId);
-    case 'rfa_log':
-      return await ingestRFALog(filePath, opts.projectId);
-    case 'payment_progress':
-      return await ingestGenericTabular(filePath, opts.projectId, { docType: 'payment_progress' });
-    default:
-      if (GENERIC_TYPES.has(docType)) {
-        return await ingestGenericTabular(filePath, opts.projectId, { docType });
-      }
-      throw new Error(`Doc type '${docType}' not yet supported. Add an ingestor.`);
-  }
+// Map doc_type → { parse(filePath, opts), commit(parsed, opts) }
+import { parse as parseDailyReport, commit as commitDailyReport } from './daily_report.js';
+import { parse as parseBusinessProcess, commit as commitBusinessProcess } from './business_process.js';
+import { parse as parseShopDrawing, commit as commitShopDrawing } from './shop_drawing.js';
+import { parse as parseConstructionSchedule, commit as commitConstructionSchedule } from './construction_schedule.js';
+import { parse as parseMaterialSupply, commit as commitMaterialSupply } from './material_supply.js';
+import { parse as parseSubcontractorDirectory, commit as commitSubcontractorDirectory } from './subcontractor_directory.js';
+import { parse as parseResourceDirectory, commit as commitResourceDirectory } from './resource_directory.js';
+import { parse as parseRFALog, commit as commitRFALog } from './rfa_log.js';
+import { parse as parseGenericTabular, commit as commitGenericTabular } from './generic_tabular.js';
+import { parse as parseProjectLevel, commit as commitProjectLevel } from './project_level.js';
+
+export const INGESTORS = {
+  daily_report: {
+    parse: (fp, opts) => parseDailyReport(fp, opts.projectId),
+    commit: (parsed, opts) => commitDailyReport(parsed, opts.projectId),
+  },
+  business_process: {
+    parse: (fp, opts) => parseBusinessProcess(fp, opts.tenantId, opts.processCode || 'project_execution'),
+    commit: (parsed, opts) => commitBusinessProcess(parsed, opts.tenantId, opts.processCode || 'project_execution'),
+  },
+  shop_drawing: {
+    parse: (fp, opts) => parseShopDrawing(fp, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitShopDrawing(parsed, opts.projectId, opts.zoneCode),
+  },
+  construction_schedule: {
+    parse: (fp, opts) => parseConstructionSchedule(fp, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitConstructionSchedule(parsed, opts.projectId, opts.zoneCode),
+  },
+  material_supply: {
+    parse: (fp, opts) => parseMaterialSupply(fp, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitMaterialSupply(parsed, opts.projectId, opts.zoneCode),
+  },
+  subcontractor_directory: {
+    parse: (fp, opts) => parseSubcontractorDirectory(fp, opts.projectId),
+    commit: (parsed, opts) => commitSubcontractorDirectory(parsed, opts.projectId),
+  },
+  resource_directory: {
+    parse: (fp, opts) => parseResourceDirectory(fp, opts.tenantId),
+    commit: (parsed, opts) => commitResourceDirectory(parsed, opts.tenantId),
+  },
+  rfa_log: {
+    parse: (fp, opts) => parseRFALog(fp, opts.projectId),
+    commit: (parsed, opts) => commitRFALog(parsed, opts.projectId),
+  },
+};
+
+for (const t of GENERIC_TYPES) {
+  INGESTORS[t] = {
+    parse: (fp, opts) => parseGenericTabular(fp, opts.projectId, { docType: t }),
+    commit: (parsed, opts) => commitGenericTabular(parsed, opts.projectId, { docType: t }),
+  };
 }
 
-// Special entrypoint for project-level (multi-zone summary) files
+// Backward-compatible: parse + commit in one call
+export async function ingest(filePath, docType, opts) {
+  const i = INGESTORS[docType];
+  if (!i) {
+    if (PROJECT_LEVEL_TYPES.has(docType)) {
+      // Project-level: parse each sheet, return parsed per sheet
+      return await ingestProjectLevel.parse(filePath, opts.projectId, { docType });
+    }
+    throw new Error(`Doc type '${docType}' not yet supported. Add an ingestor.`);
+  }
+  const parsed = await i.parse(filePath, opts);
+  return await i.commit(parsed, opts);
+}
+
+// Project-level file (multi-zone summary)
 export async function ingestProjectLevelFile(filePath, projectId, docType) {
   if (!PROJECT_LEVEL_TYPES.has(docType)) {
     throw new Error(`Doc type '${docType}' not supported for project-level ingestion`);
   }
-  return await ingestProjectLevel(filePath, projectId, { docType });
+  return await ingestProjectLevel.parse(filePath, projectId, { docType });
 }
 
-export function findOrCreateProject(tenantId, projectCode) {
+export async function findOrCreateProject(tenantId, projectCode, extra = {}) {
   const db = getDb();
-  let project = db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').get(tenantId, projectCode);
+  let project = await db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').getAsync(tenantId, projectCode);
   if (!project) {
-    const result = db.prepare('INSERT INTO projects (tenant_id, code, name_vi) VALUES (?, ?, ?)').run(tenantId, projectCode, projectCode);
-    project = { id: Number(result.lastInsertRowid) };
+    const r = await db.prepare(`
+      INSERT INTO projects (tenant_id, code, name_vi, name_en, package, rev_prefix)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).runAsync(tenantId, projectCode, extra.name_vi || projectCode, extra.name_en || null, extra.package || null, extra.rev_prefix || null);
+    project = { id: Number(r.lastInsertRowid) };
   }
   return project;
+}
+
+export async function findOrCreateZone(projectId, zoneCode, zoneName = null) {
+  const db = getDb();
+  const code = String(zoneCode).trim();
+  if (!code) return null;
+  let zone = await db.prepare('SELECT id, code FROM zones WHERE project_id = ? AND code = ?').getAsync(projectId, code);
+  if (!zone) {
+    const r = await db.prepare('INSERT INTO zones (project_id, code, name_vi, name_en) VALUES (?, ?, ?, ?)').runAsync(projectId, code, zoneName || code, zoneName || code);
+    zone = { id: Number(r.lastInsertRowid), code };
+  }
+  return zone;
 }

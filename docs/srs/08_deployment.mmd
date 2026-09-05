@@ -1,0 +1,50 @@
+flowchart TB
+  subgraph Client [Client Devices]
+    WB[Web Browser<br/>Chrome/Firefox/Safari<br/>Desktop, Tablet, Mobile]
+  end
+
+  subgraph DMZ [DMZ / Public]
+    CF[Cloudflare Tunnel<br/>public.pmo.vutun.io]
+  end
+
+  subgraph Server [Application Server - WSL Ubuntu]
+    N[Node.js 20]
+    subgraph App [Express App port 3000]
+      API[REST API<br/>60+ endpoints]
+      STATIC[Static serve<br/>frontend/dist/]
+      RL[Rate Limiter<br/>5/min login<br/>100/min API]
+      AUTH[JWT-like Auth<br/>32 hex tokens]
+    end
+    subgraph Frontend [Vite-built React SPA]
+      HQ[HQ Module]
+      FL[Field PWA]
+      GV[Governance]
+      WIZ[Upload Wizard]
+    end
+  end
+
+  subgraph Data [Data Layer]
+    PG[(PostgreSQL 16<br/>127.0.0.1:5433<br/>pmo_user/pmo_dev_pwd<br/>40+ tables)]
+    FS[Local Filesystem<br/>backend/data/uploads/]
+  end
+
+  subgraph External [External]
+    EXCEL[Excel Files<br/>user uploads]
+  end
+
+  WB -->|HTTPS| CF
+  CF -->|HTTP localhost:3000| N
+  N --> API
+  N --> STATIC
+  API --> RL
+  API --> AUTH
+  API --> PG
+  API --> FS
+  STATIC --> Frontend
+  EXCEL -.->|multipart| API
+  Frontend -.->|JSON over HTTPS| API
+
+  style CF fill:#FFB6C1
+  style PG fill:#90EE90
+  style FS fill:#FFE4B5
+  style EXCEL fill:#E6E6FA

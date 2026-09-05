@@ -5,6 +5,7 @@ import { projects, construction, exportApi } from '../api/index.js';
 import { getToken } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { HEALTH } from '../constants.js';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 export default function ProgressDetail() {
   const [params] = useSearchParams();
@@ -75,9 +76,7 @@ export default function ProgressDetail() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => { setSelectedProject(Number(e.target.value)); setZone(''); }}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={id => { setSelectedProject(id); setZone(''); }} placeholder="Chọn dự án..." />
         <label>Zone</label>
         <select value={zone} onChange={e => setZone(e.target.value)}>
           <option value="">All</option>

@@ -48,25 +48,26 @@ npm install
 
 ### 2. Setup Database
 
-**Option A: SQLite (default, no setup needed)**
-- DB file auto-created at `backend/data/pmo.db`
-- Default: 7 demo accounts + 2 projects + sample data
+**PostgreSQL (only option since v1.0, 2026-09-04)**
 
-**Option B: PostgreSQL (production)**
 ```bash
-# Create database
-psql -U postgres -c "CREATE USER pmo_user WITH PASSWORD 'pmo_pass';"
-psql -U postgres -c "CREATE DATABASE pmo OWNER pmo_user;"
-
-# Set environment
-export DATABASE_URL="postgresql://pmo_user:pmo_pass@localhost:5432/pmo"
-export DB_DRIVER=pg
-
-# Run migrations
+# Use the helper script (manages local PG cluster)
 cd backend
-psql $DATABASE_URL -f drizzle/0000_naive_nick_fury.sql
-node seed-users.mjs
+./scripts/pg-ctl.sh start    # Data dir: ../data/pgdata/, Port: 5433
+
+# Connection (already in backend/.env):
+#   postgresql://pmo_user:***@127.0.0.1:5433/pmo
+
+# Apply migrations (idempotent)
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo \
+  -f drizzle/0000_naive_nick_fury.sql
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo \
+  -f drizzle/9998_align_schema_with_routes.sql
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo \
+  -f drizzle/9999_add_issues_table.sql
 ```
+
+**Why port 5433 not 5432?** WSL2 → Windows port forwarding silently fails on 5432. PG runs on 5433.
 
 ### 3. Start Backend
 
@@ -145,9 +146,9 @@ docker stop pmo-test && docker rm pmo-test
 - Validation: zone not found → clear error, missing data → skip with reason
 
 ### Security
-- Rate limiting: 5 login/min/IP, 100 API/min/IP (express-rate-limit)
+- ~~Rate limiting~~ — **disabled** since 2026-09-04 (admin needs unrestricted access)
 - Password hashing: bcrypt (10 rounds)
-- Session: HTTP-only cookie, 7-day expiry
+- Session: Bearer token (32 hex chars) in localStorage
 - CORS: open in dev, configurable for prod
 
 ## Testing
@@ -172,19 +173,24 @@ pmo-project/
 ├── backend/
 │   ├── src/
 │   │   ├── index.js              # Express routes
-│   │   ├── db/index.js           # DB abstraction (SQLite/PG)
+│   │   ├── db/index.js           # PG-only driver
 │   │   ├── lib/                  # auth, excel, storage, validation
-│   │   └── services/ingest/      # 8 ingestor modules
+│   │   └── services/ingest/      # 10 ingestor modules (parse + commit)
 │   ├── scripts/
+│   │   ├── pg-ctl.sh             # PG control (start/stop/backup/psql)
 │   │   ├── generate-test-excel.mjs
 │   │   ├── upload-test-pipeline.mjs
 │   │   ├── test-admin-full-access.mjs
-│   │   ├── seed-users.mjs
 │   │   └── archive/              # deprecated scripts
-│   ├── drizzle/                  # PG schema
+│   ├── drizzle/                  # PG schema (40+ tables)
+│   │   ├── 0000_naive_nick_fury.sql
+│   │   ├── 9998_align_schema_with_routes.sql
+│   │   └── 9999_add_issues_table.sql
 │   ├── data/
-│   │   ├── pmo.db                # SQLite (gitignored)
+│   │   ├── pgdata/               # PG cluster data (66MB+, gitignored)
+│   │   ├── uploads/              # Uploaded Excel files
 │   │   └── test-fixtures/        # Test Excel files
+│   ├── .env                      # DATABASE_URL, DB_DRIVER
 │   ├── package.json
 │   └── Dockerfile
 ├── frontend/

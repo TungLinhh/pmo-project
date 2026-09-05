@@ -1,3 +1,12 @@
+-- ============================================================================
+-- SQLite schema (THAM KHẢO LỊCH SỬ — KHÔNG DÙNG CHO PRODUCTION)
+-- ============================================================================
+-- Ngày viết: 2026-08
+-- Mục đích: Tham khảo cấu trúc ban đầu khi hệ thống dùng SQLite.
+--           Đã migrate hoàn toàn sang PostgreSQL (xem docs/db-schema.md).
+-- Schema PG thật: src/db/schema-pg.js (Drizzle) + drizzle/9998_align_schema_with_routes.sql
+-- ============================================================================
+
 -- PMO System - SQLite schema (MVP)
 -- Compatible with PostgreSQL syntax for future migration
 

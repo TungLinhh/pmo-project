@@ -1,58 +1,82 @@
 // Ingestion: Material Supply (file: Vật tư BOH.xlsx, etc.)
-// Uses legacy schema: materials (project_id, zone_id, material_code, name_vi, name_en, progress_pct, 4 request dates)
+// PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt, toFloat, toDate } from '../../lib/excel.js';
+import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
+import { findOrCreateZone } from './index.js';
 
-export async function ingestMaterialSupply(filePath, projectId, zoneCode) {
-  const db = getDb();
+const HEADER_KEYWORDS = ['mã hiệu', 'mã', 'tên', 'stt', 'tt', 'code', 'reference'];
+
+function resolveZone(zoneCode) {
+  if (!zoneCode) return { code: 'GEN-MAT', name: 'Material Supply - General' };
+  return { code: zoneCode, name: zoneCode };
+}
+
+function parseRow(row, rIdx) {
+  const code = toText(row[5]);
+  const name = toText(row[6]);
+  if (!code && !name) return null;
+  return {
+    material_code: code || `AUTO-${rIdx}`,
+    name_vi: name,
+    name_en: null,
+    progress_pct: toFloat(row[7]),
+    request_date_1: toDate(row[8]),
+    request_date_2: toDate(row[9]),
+    request_date_3: toDate(row[10]),
+    request_date_4: toDate(row[11]),
+  };
+}
+
+export async function parse(filePath, projectId, zoneCode) {
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: 'material_supply', zone: zoneCode, ok: 0, errors: 0, items: [] };
-
-  const zone = db.prepare('SELECT id FROM zones WHERE project_id = ? AND code = ?').get(projectId, zoneCode);
-  if (!zone) {
-    report.errors++;
-    report.items.push({ error: `Zone '${zoneCode}' not found` });
-    return report;
-  }
-  const zoneId = zone.id;
-
+  const { code, name } = resolveZone(zoneCode);
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
     const rows = readSheet(filePath, sheetName);
     if (rows.length < 5) continue;
-
-    // Heuristic: find data start
-    let dataStart = 0;
-    for (let i = 0; i < Math.min(30, rows.length); i++) {
-      if (toInt(rows[i][0]) && toText(rows[i][5])) { dataStart = i; break; }
-    }
-
-    db.prepare('DELETE FROM materials WHERE project_id = ? AND zone_id = ? AND material_code IN (SELECT material_code FROM materials WHERE 1=0)').run(projectId, zoneId);
-
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO materials (project_id, zone_id, material_code, name_vi, name_en, progress_pct,
-        request_date_1, request_date_2, request_date_3, request_date_4)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
-    `);
-
+    const dataStart = findDataStart(rows, { codeCol: 5, nameCol: 6, headerKeywords: HEADER_KEYWORDS, maxScan: 30 });
+    const sheetRows = [];
     for (let r = dataStart; r < rows.length; r++) {
-      const row = rows[r] || [];
-      const code = toText(row[5]);
-      const name = toText(row[6]);
-      if (!code && !name) continue;
+      const parsed = parseRow(rows[r] || [], r);
+      if (parsed) sheetRows.push({ rowIndex: r + 1, ...parsed });
+    }
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, rows: sheetRows });
+  }
+  return { zone: { code, name }, sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
+export async function commit(parsed, projectId, zoneCode) {
+  const db = getDb();
+  const { code } = resolveZone(zoneCode);
+  const zone = await findOrCreateZone(projectId, code, code);
+  const zoneId = zone.id;
+
+  const report = { doc_type: 'material_supply', zone: code, ok: 0, errors: 0, items: [] };
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
       try {
-        insert.run(
-          projectId, zoneId, code || `AUTO-${r}`, name, null, toFloat(row[7]),
-          toDate(row[8]), toDate(row[9]), toDate(row[10]), toDate(row[11])
+        await db.upsert('materials',
+          { conflictCols: ['project_id', 'zone_id', 'material_code'] },
+          {
+            project_id: projectId, zone_id: zoneId, source_sheet: sheet.sheet,
+            material_code: row.material_code, name_vi: row.name_vi, name_en: row.name_en,
+            progress_pct: row.progress_pct,
+            request_date_1: row.request_date_1, request_date_2: row.request_date_2,
+            request_date_3: row.request_date_3, request_date_4: row.request_date_4,
+          }
         );
         report.ok++;
       } catch (e) {
         report.errors++;
-        report.items.push({ sheet: sheetName, row: r + 1, code, error: e.message });
+        report.items.push({ sheet: sheet.sheet, code: row.material_code, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestMaterialSupply(filePath, projectId, zoneCode) {
+  const parsed = await parse(filePath, projectId, zoneCode);
+  return await commit(parsed, projectId, zoneCode);
 }

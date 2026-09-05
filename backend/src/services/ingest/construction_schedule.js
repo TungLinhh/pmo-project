@@ -1,9 +1,16 @@
 // Ingestion: Construction Schedule (file: TĐ BOH.xlsx, etc.)
-// Per user Q6: split level_roman + level_arabic
+// PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt, toFloat, toDate } from '../../lib/excel.js';
+import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
+import { findOrCreateZone } from './index.js';
 
-// Parse "A", "I", "II", "1", "1.1", "2.3" -> {roman, arabic, sublevel}
+const HEADER_KEYWORDS = ['stt', 'tt', 'hạng mục', 'nội dung', 'tiến độ'];
+
+function resolveZone(zoneCode) {
+  if (!zoneCode) return { code: 'GEN-TD', name: 'Construction Schedule - General' };
+  return { code: zoneCode, name: zoneCode };
+}
+
 function parseLevel(stt) {
   if (!stt) return { roman: null, arabic: null, sublevel: null };
   const s = String(stt).trim();
@@ -13,73 +20,77 @@ function parseLevel(stt) {
     const [a, b] = s.split('.').map(n => parseInt(n, 10));
     return { roman: null, arabic: a, sublevel: b };
   }
-  return { roman: s, arabic: null, sublevel: null };  // fallback: store as roman
+  return { roman: s, arabic: null, sublevel: null };
 }
 
-function mapStatus(v) {
-  if (v === 'YES' || v === 'yes' || v === 'Y') return 'DONE';
-  if (v === 'NO' || v === 'no' || v === 'N') return 'PENDING';
-  return null;
+function parseRow(row) {
+  const stt = toText(row[3]);
+  const name = toText(row[4]);
+  if (!name) return null;
+  const { roman, arabic, sublevel } = parseLevel(stt);
+  return {
+    level_roman: roman, level_arabic: arabic, sublevel, ordinal: toInt(stt) || null,
+    name_vi: name, name_en: null,
+    progress_pct: toFloat(row[5]),
+    status: row[6] === 'YES' || row[6] === 'yes' || row[6] === 'Y' ? 'DONE' : (row[6] === 'NO' || row[6] === 'no' || row[6] === 'N' ? 'PENDING' : null),
+    plan_start_date: toDate(row[7]),
+    actual_start_date: toDate(row[8]),
+    plan_end_date: toDate(row[9]),
+    actual_end_date: toDate(row[10]),
+    plan_duration_days: toInt(row[11]),
+  };
 }
 
-export async function ingestConstructionSchedule(filePath, projectId, zoneCode) {
-  const db = getDb();
+export async function parse(filePath, projectId, zoneCode) {
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: 'construction_schedule', zone: zoneCode, ok: 0, errors: 0, items: [] };
-
-  const zone = db.prepare('SELECT id FROM zones WHERE project_id = ? AND code = ?').get(projectId, zoneCode);
-  if (!zone) {
-    return { ...report, errors: 1, items: [{ error: `Zone '${zoneCode}' not found` }] };
-  }
-  const zoneId = zone.id;
-
+  const { code, name } = resolveZone(zoneCode);
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
     if (!sheetName.toUpperCase().includes('TĐ') && !sheetName.toUpperCase().includes('TD')) continue;
     const rows = readSheet(filePath, sheetName);
+    const dataStart = findDataStart(rows, { codeCol: 3, nameCol: 4, headerKeywords: HEADER_KEYWORDS, maxScan: 30 });
+    const sheetRows = [];
+    for (let r = dataStart; r < rows.length; r++) {
+      const parsed = parseRow(rows[r] || []);
+      if (parsed) sheetRows.push({ rowIndex: r + 1, ...parsed });
+    }
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, rows: sheetRows });
+  }
+  return { zone: { code, name }, sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
-    // Header at R14 (0-indexed 13), data starts R17 (0-indexed 16)
-    // Cols: 3=Stt, 4=Name, 5=Progress, 6=Status, 7=PlanStart, 8=ActualStart,
-    //        9=PlanEnd, 10=ActualEnd, 11=PlanDays
-    db.prepare('DELETE FROM construction_schedule_items WHERE project_id = ? AND zone_id = ?').run(projectId, zoneId);
+export async function commit(parsed, projectId, zoneCode) {
+  const db = getDb();
+  const { code } = resolveZone(zoneCode);
+  const zone = await findOrCreateZone(projectId, code, code);
+  const zoneId = zone.id;
 
-    const insert = db.prepare(`
-      INSERT INTO construction_schedule_items (
-        project_id, zone_id, level_roman, level_arabic, sublevel, ordinal,
-        name_vi, name_en, progress_pct, status,
-        plan_start_date, actual_start_date, plan_end_date, actual_end_date, plan_duration_days
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (let r = 16; r < rows.length; r++) {
-      const row = rows[r] || [];
-      const stt = toText(row[3]);
-      const name = toText(row[4]);
-      if (!name) continue;
-
-      const { roman, arabic, sublevel } = parseLevel(stt);
-
+  const report = { doc_type: 'construction_schedule', zone: code, ok: 0, errors: 0, items: [] };
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
       try {
-        // Coerce nulls - SQLite Node can be picky about undefined vs null
-        const params = [
-          projectId, zoneId, roman ?? null, arabic ?? null, sublevel ?? null, toInt(stt) || null,
-          name, null, toFloat(row[5]), mapStatus(row[6]),
-          toDate(row[7]), toDate(row[8]), toDate(row[9]), toDate(row[10]), toInt(row[11])
-        ];
-        // Sanity check
-        for (let i = 0; i < params.length; i++) {
-          if (params[i] === undefined) {
-            throw new Error(`param ${i + 1} is undefined (stt=${stt}, name=${name})`);
+        await db.upsert('construction_schedule_items',
+          { conflictCols: ['project_id', 'zone_id', 'source_sheet', 'ordinal'] },
+          {
+            project_id: projectId, zone_id: zoneId, source_sheet: sheet.sheet,
+            level_roman: row.level_roman, level_arabic: row.level_arabic, sublevel: row.sublevel, ordinal: row.ordinal,
+            name_vi: row.name_vi, name_en: row.name_en, progress_pct: row.progress_pct, status: row.status,
+            plan_start_date: row.plan_start_date, actual_start_date: row.actual_start_date,
+            plan_end_date: row.plan_end_date, actual_end_date: row.actual_end_date, plan_duration_days: row.plan_duration_days,
           }
-        }
-        insert.run(...params);
+        );
         report.ok++;
       } catch (e) {
         report.errors++;
-        report.items.push({ sheet: sheetName, row: r + 1, stt, name, error: e.message });
+        report.items.push({ sheet: sheet.sheet, name: row.name_vi, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestConstructionSchedule(filePath, projectId, zoneCode) {
+  const parsed = await parse(filePath, projectId, zoneCode);
+  return await commit(parsed, projectId, zoneCode);
 }

@@ -1,49 +1,59 @@
 // Ingestion: Subcontractor Directory (file: Quy trình thuê thầu phụ, tổ đội.xlsx)
+// PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
-import { readSheet, toText, toInt, toFloat, toDate } from '../../lib/excel.js';
+import { readSheet, toText, toInt, findDataStart } from '../../lib/excel.js';
 
-export async function ingestSubcontractorDirectory(filePath, projectId) {
-  const db = getDb();
+const HEADER_KEYWORDS = ['stt', 'tt', 'no', 'no.'];
+
+function parseRow(row) {
+  const name = toText(row[1]);
+  if (!name) return null;
+  return {
+    name,
+    capability_summary: toText(row[2]),
+    status: toText(row[8]) || 'ACTIVE',
+    is_internal_team: false,
+  };
+}
+
+export async function parse(filePath, projectId) {
   const XLSX = (await import('xlsx')).default;
   const wb = XLSX.readFile(filePath, { cellDates: true });
-  const report = { doc_type: 'subcontractor_directory', ok: 0, errors: 0, items: [] };
-
+  const sheets = [];
   for (const sheetName of wb.SheetNames) {
     const rows = readSheet(filePath, sheetName);
-
-    // Try to detect the data schema
-    let dataStart = 1;
-    if (toInt(rows[0]?.[0]) && toText(rows[0]?.[1])) dataStart = 0;
-
-    // Use legacy schema: tenant-level, name + capability_summary
-    const tenantId = 1;
-    db.prepare('DELETE FROM subcontractors WHERE tenant_id = ? AND name IN (SELECT name FROM subcontractors WHERE 1=0)').run(tenantId);
-    // (Use unique-by-name pattern)
-
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO subcontractors (tenant_id, name, capability_summary, status, is_internal_team)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
+    const dataStart = findDataStart(rows, { codeCol: 0, nameCol: 1, headerKeywords: HEADER_KEYWORDS, maxScan: 20 });
+    const sheetRows = [];
     for (let r = dataStart; r < rows.length; r++) {
-      const row = rows[r] || [];
-      const ordinal = toInt(row[0]);
-      const name = toText(row[1]);
-      if (!name) continue;
+      const parsed = parseRow(rows[r] || []);
+      if (parsed) sheetRows.push({ rowIndex: r + 1, ...parsed });
+    }
+    if (sheetRows.length > 0) sheets.push({ sheet: sheetName, rows: sheetRows });
+  }
+  return { sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
+}
 
+export async function commit(parsed, projectId) {
+  const db = getDb();
+  const report = { doc_type: 'subcontractor_directory', ok: 0, errors: 0, items: [] };
+  for (const sheet of parsed.sheets) {
+    for (const row of sheet.rows) {
       try {
-        insert.run(
-          tenantId, name, toText(row[2]),
-          toText(row[8]) || 'ACTIVE',
-          0
+        await db.upsert('subcontractors',
+          { conflictCols: ['tenant_id', 'name'] },
+          { tenant_id: 1, name: row.name, capability_summary: row.capability_summary, status: row.status, is_internal_team: row.is_internal_team }
         );
         report.ok++;
       } catch (e) {
         report.errors++;
-        report.items.push({ sheet: sheetName, row: r + 1, name, error: e.message });
+        report.items.push({ sheet: sheet.sheet, name: row.name, error: e.message });
       }
     }
   }
-
   return report;
+}
+
+export async function ingestSubcontractorDirectory(filePath, projectId) {
+  const parsed = await parse(filePath, projectId);
+  return await commit(parsed, projectId);
 }

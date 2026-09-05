@@ -7,6 +7,7 @@ import { ICON } from '../icons.jsx';
 import PieChart from '../components/PieChart.jsx';
 import PieTooltip from '../components/PieTooltip.jsx';
 import { toast } from '../components/Toast.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 const STATUS_COLORS = {
   PENDING: 'var(--c-draft)',
@@ -119,9 +120,7 @@ export default function Payment() {
 
       <div className="filter-bar">
         <label>Project</label>
-        <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))}>
-          {allProjects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-        </select>
+        <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
       </div>
 
       <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>

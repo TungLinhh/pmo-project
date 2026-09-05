@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { projects, getToken, masterData } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { toast } from '../components/Toast.jsx';
+import ProjectPicker from '../components/ProjectPicker.jsx';
 
 export default function Manpower() {
   const [params] = useSearchParams();
@@ -72,9 +73,7 @@ export default function Manpower() {
           <div className="meta">Tổng hợp nhân lực và thiết bị</div>
         </div>
         <div className="page-header-right">
-          <select value={selectedProject || ''} onChange={e => setSelectedProject(Number(e.target.value))} style={{ width: 200 }}>
-            {allProjects.map(p => <option key={p.id} value={p.id}>{p.code}</option>)}
-          </select>
+          <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
         </div>
       </div>
 
