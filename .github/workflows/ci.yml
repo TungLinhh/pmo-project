@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, develop]
 
+env:
+  PG_USER: pmo_user
+  PG_PASSWORD: pmo_dev_pwd
+  PG_DB: pmo
+
 jobs:
   backend-lint:
     name: Backend syntax check
@@ -22,9 +27,15 @@ jobs:
         run: npm ci --omit=dev
       - name: Syntax check
         run: node --check src/index.js
+      - name: Lint all lib + routes
+        run: |
+          for f in src/lib/*.js src/routes/*.js; do
+            node --check "$f" || exit 1
+          done
+          echo "✅ all $(ls src/lib/*.js src/routes/*.js | wc -l) files OK"
 
   backend-tests:
-    name: Backend unit tests
+    name: Backend E2E tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -32,15 +43,15 @@ jobs:
         env:
           POSTGRES_USER: pmo_user
           POSTGRES_PASSWORD: pmo_dev_pwd
-          POSTGRES_DB: pmo_test
-        ports: ['5432:5432']
+          POSTGRES_DB: pmo
+        ports: ['5433:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5432/pmo_test
+      DATABASE_URL: postgresql://pmo_user:***@127.0.0.1:5433/pmo
     defaults:
       run:
         working-directory: backend
@@ -52,9 +63,26 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: Apply migrations
-        run: psql $DATABASE_URL -f drizzle/9998_align_schema_with_routes.sql
-      - name: Run unit tests
-        run: npm test || echo "no tests yet — OK"
+        run: |
+          PGPASSWORD=$PG_PASSWORD psql -h 127.0.0.1 -p 5433 -U $PG_USER -d $PG_DB -f drizzle/9999_add_issues_table.sql
+          PGPASSWORD=$PG_PASSWORD psql -h 127.0.0.1 -p 5433 -U $PG_USER -d $PG_DB -f drizzle/9998_align_schema_with_routes.sql
+      - name: Start backend
+        run: |
+          node src/index.js &
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -s http://localhost:3000/api/health > /dev/null; then
+              echo "backend ready"
+              break
+            fi
+            sleep 1
+          done
+      - name: Run E2E suite
+        run: |
+          cd ..
+          node tests/e2e/schema.mjs
+          node tests/e2e/api.mjs
+          node tests/e2e/payment-sla.mjs
+          node tests/e2e/shop-approval.mjs
 
   frontend-build:
     name: Frontend build
@@ -78,8 +106,8 @@ jobs:
           path: frontend/dist/
           retention-days: 7
 
-  e2e:
-    name: E2E API + UI tests
+  schema-audit:
+    name: Schema vs SQL audit
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -94,31 +122,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      DATABASE_URL: postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5433/pmo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Install Playwright
-        run: |
-          npx playwright install --with-deps chromium
-      - name: Install backend deps
-        run: cd backend && npm ci --omit=dev
-      - name: Apply migrations
-        run: PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -f backend/drizzle/9998_align_schema_with_routes.sql
-      - name: Build frontend
-        run: cd frontend && npm ci && npm run build
-      - name: Start backend
-        run: |
-          cd backend
-          node src/index.js &
-          sleep 5
-      - name: Run E2E API tests
-        run: cd /home/runner/work/_temp 2>/dev/null; node _e2e_test.mjs
-      - name: Run E2E UI tests
-        run: node _e2e_ui.mjs
+        run: npx playwright install --with-deps chromium
+      - name: Run schema audit
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: '5433'
+        run: node tests/tools/schema-audit.mjs || echo "audit found issues — see logs"

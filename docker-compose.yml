@@ -1,0 +1,38 @@
+# PMO local dev stack — PostgreSQL + backend + (optional) Cloudflare tunnel
+# Usage: docker compose up postgres backend
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pmo_user
+      POSTGRES_PASSWORD: pmo_dev_pwd
+      POSTGRES_DB: pmo
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmo_user -d pmo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: pmo_user
+      DB_PASSWORD: pmo_dev_pwd
+      DB_NAME: pmo
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

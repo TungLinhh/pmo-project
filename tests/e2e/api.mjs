@@ -1,5 +1,5 @@
 // E2E test toàn bộ flow PMO MVP
-import { chromium } from '/home/vutun/pmo_project/node_modules/playwright/index.mjs';
+// Chạy: node tests/e2e/api.mjs (cần backend running ở localhost:3000)
 
 const BASE = 'http://localhost:3000';
 const results = [];
