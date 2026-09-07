@@ -10,9 +10,23 @@ function authHeaders() {
 }
 
 async function req(path, opts = {}) {
+  // Auto JSON.stringify body + set Content-Type khi caller truyền object
+  // (Nếu caller đã stringify sẵn thành string, vẫn set Content-Type để server parse)
+  // FormData/Blob: KHÔNG set Content-Type (browser tự thêm với boundary)
+  let { body, headers = {}, ...rest } = opts;
+  const isFormData = body instanceof FormData;
+  const isBlob = body instanceof Blob;
+  const isJson = body !== undefined && body !== null && !isFormData && !isBlob;
+  if (isJson && typeof body !== 'string') body = JSON.stringify(body);
+  const finalHeaders = {
+    ...(isJson ? { 'Content-Type': 'application/json' } : {}),
+    ...authHeaders(),
+    ...headers,
+  };
   const r = await fetch(BASE + path, {
-    ...opts,
-    headers: { ...authHeaders(), ...(opts.headers || {}) },
+    ...rest,
+    headers: finalHeaders,
+    body,
   });
   if (!r.ok) {
     const t = await r.text();
