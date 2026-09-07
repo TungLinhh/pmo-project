@@ -2,7 +2,7 @@
 // File: Báo cáo công việc C20 ngày 23.5.2021.xlsx — each sheet = 1 day
 // PG-only. Mô hình A wizard.
 import { getDb } from '../../db/index.js';
-import { fieldFromDbError, recordFailure } from './failures.js';
+import { fieldFromDbError } from './failures.js';
 import { readSheet, toDate, toInt, toFloat, toText } from '../../lib/excel.js';
 
 function parseSheetDate(sheetName) {
