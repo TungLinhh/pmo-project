@@ -1,7 +1,7 @@
-// E2E test cho payment chain 4 step + material submittal SLA
-import { execSync } from 'node:child_process';
+// E2E test cho payment chain 4 step + material submittal SLA — env-driven
+import { psqlQuery, apiBase } from '../tools/env.mjs';
 
-const BASE = 'http://localhost:3000';
+const BASE = apiBase();
 const log = [];
 function pass(n, d) { log.push({ n, ok: true, d }); console.log(`  ✅ ${n}: ${d}`); }
 function fail(n, d) { log.push({ n, ok: false, d }); console.log(`  ❌ ${n}: ${d}`); }
@@ -109,9 +109,9 @@ if (m2.status === 200 && m2.data?.supervisor_deadline && m2.data?.sla_deadline) 
 }
 
 // Verify db row
-const verify = execSync(
-  `PGPASSWORD=pmo_dev_pwd /home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "SELECT supervisor_approval_days, supervisor_deadline, sla_deadline, sla_days, status FROM material_submittals WHERE id=${msId};"`,
-  { encoding: 'utf8' }
+const verify = psqlQuery(
+  `SELECT supervisor_approval_days, supervisor_deadline, sla_deadline, sla_days, status FROM material_submittals WHERE id=${msId};`,
+  { tuplesOnly: false }
 );
 if (verify.includes('SUBMITTED') && verify.includes(' 3 ')) {
   pass('DB verify: supervisor_approval_days=3, status=SUBMITTED', 'OK');

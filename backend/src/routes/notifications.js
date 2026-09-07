@@ -35,9 +35,17 @@ router.post('/mark-all-read', async (req, res) => {
 
 router.post('/', async (req, res) => {
   // Manual create notification (admin only)
-  const { user_ids, title, body, link, channel, severity } = req.body || {};
+  const { user_ids, title, body, link, channel, severity, projectId, project_id, issueId, issue_id, resourceType, resource_id } = req.body || {};
   if (!title || !user_ids?.length) return res.status(400).json({ error: 'title and user_ids[] required' });
-  await notifyMany(req, user_ids, { title, body, link, channel: channel || 'in_app', severity: severity || 'INFO' });
+  await notifyMany(user_ids, {
+    title, body, link,
+    channels: [channel || 'in_app'],
+    severity: severity || 'info',
+    projectId: projectId ?? project_id ?? null,
+    issueId: issueId ?? issue_id ?? null,
+    resourceType: resourceType || null,
+    resourceId: resource_id ?? null,
+  });
   res.json({ ok: true, count: user_ids.length });
 });
 

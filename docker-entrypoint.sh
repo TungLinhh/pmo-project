@@ -26,9 +26,10 @@ if [ -z "$DATABASE_URL" ] && [ -n "$DB_HOST" ]; then
   export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}"
 fi
 
-# Apply migrations + seed (idempotent)
+# Apply migrations + seed (idempotent). FATAL on failure — never boot on a half-migrated DB.
 echo "Initializing database..."
-node backend/src/db/init.js || echo "⚠ init failed (non-fatal — schema may already be applied)"
+node backend/src/db/init.js
+echo "✓ init ok"
 
 echo "=== Starting backend ==="
 exec "$@"

@@ -89,6 +89,23 @@ router.get('/invoices/:id/payment-requests', async (req, res) => {
   res.json(await db.prepare('SELECT * FROM payment_requests WHERE invoice_id = ? ORDER BY due_date ASC').allAsync(req.params.id));
 });
 
+// Project-scoped payment-request queue (joins the contract→invoice chain)
+router.get('/projects/:id/payment-requests', async (req, res) => {
+  const db = getDb();
+  const { status } = req.query;
+  const where = ['c.project_id = $1'];
+  const params = [req.params.id];
+  let i = 2;
+  if (status) { where.push(`pr.status = $${i++}`); params.push(status); }
+  params.push(Math.min(parseInt(req.query.limit) || 200, 500));
+  res.json(await db.prepare(
+    `SELECT pr.*, i.contract_id, c.contract_no FROM payment_requests pr
+     JOIN invoices i ON i.id = pr.invoice_id
+     JOIN contracts c ON c.id = i.contract_id
+     WHERE ${where.join(' AND ')} ORDER BY pr.due_date ASC LIMIT $${i}`
+  ).allAsync(...params));
+});
+
 // Update PR (APPROVE / REJECT)
 router.get('/payment-requests/:id', async (req, res) => {
   const db = getDb();

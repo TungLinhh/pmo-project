@@ -1,43 +1,49 @@
-// Browser test: load page qua tunnel, check console errors
+// Browser smoke test (wired into `npm test`): loads the app at BASE_URL,
+// asserts shell render + login flow + zero page errors. Requires playwright
+// browsers (`npx playwright install chromium`) and a running backend+frontend.
+// Run: BASE_URL=http://localhost:3000 node tests/e2e/browser.mjs
 import { chromium } from 'playwright';
+import { apiBase } from '../tools/env.mjs';
+
+const BASE = apiBase();
+const SCREENSHOT = process.env.SCREENSHOT_PATH || '/tmp/pmo_screen.png';
+let failures = 0;
+const check = (cond, msg) => { console.log(`${cond ? 'PASS' : 'FAIL'} — ${msg}`); if (!cond) failures++; };
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-const errors = [];
-const consoleMsgs = [];
-page.on('console', msg => consoleMsgs.push(`[${msg.type()}] ${msg.text()}`));
-page.on('pageerror', e => errors.push('PAGE ERROR: ' + e.message));
-page.on('requestfailed', r => errors.push('REQ FAIL: ' + r.url() + ' - ' + r.failure()?.errorText));
+const pageErrors = [];
+const reqFailed = [];
+page.on('pageerror', e => pageErrors.push(e.message));
+page.on('requestfailed', r => reqFailed.push(`${r.url()} (${r.failure()?.errorText})`));
 
 try {
-  await page.goto('https://firm-writings-ids-basename.trycloudflare.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(5000);
+  await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(3000);
   const html = await page.content();
-  console.log('=== URL:', page.url());
-  console.log('=== Title:', await page.title());
-  console.log('=== Body length:', html.length);
-  console.log('=== Has #root?', html.includes('id="root"'));
-  console.log('=== Has React content?', html.includes('ControlCenter') || html.includes('Dashboard'));
+  check(html.includes('id="root"'), 'app shell renders (#root)');
+  check((await page.title()).length > 0, `page has title (${await page.title()})`);
 
-  // Try login
-  await page.fill('input[type="email"], input[name="email"]', 'admin@hbg.com');
+  // login via the real form
+  await page.fill('input[type="email"]', 'admin@hbg.com');
   await page.fill('input[type="password"]', 'admin123');
   await page.click('button[type="submit"]');
-  await page.waitForTimeout(3000);
-  console.log('=== After login URL:', page.url());
-  const html2 = await page.content();
-  console.log('=== After login body length:', html2.length);
-  console.log('=== Has #root content?', html2.length > 1000);
+  await page.waitForTimeout(4000);
+  const url = page.url();
+  check(url.includes('/hq') || url.includes('/field'), `login lands in app shell (got ${url})`);
+  const after = await page.content();
+  check(after.length > html.length, `post-login content loads (${html.length} → ${after.length} chars)`);
 
-  await page.screenshot({ path: '/tmp/pmo_screen.png' });
-  console.log('=== Screenshot saved /tmp/pmo_screen.png');
+  await page.screenshot({ path: SCREENSHOT });
+  console.log(`screenshot: ${SCREENSHOT}`);
 } catch (e) {
-  console.log('TEST FAILED:', e.message);
+  check(false, `browser flow threw: ${e.message}`);
 }
 
-console.log('\n=== CONSOLE ===');
-consoleMsgs.forEach(m => console.log(m));
-console.log('\n=== ERRORS ===');
-errors.forEach(m => console.log(m));
+check(pageErrors.length === 0, `zero page errors (got ${pageErrors.length}: ${pageErrors.slice(0, 3).join(' | ')})`);
+const appReqFailed = reqFailed.filter(u => u.startsWith(BASE) || u.startsWith('/'));
+check(appReqFailed.length === 0, `zero failed app requests (got ${appReqFailed.length}: ${appReqFailed.slice(0, 3).join(' | ')})`);
 
 await browser.close();
+console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL PASS');
+process.exit(failures ? 1 : 0);

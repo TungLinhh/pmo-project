@@ -17,9 +17,9 @@ function relativeTime(iso) {
 }
 
 function navFor(n) {
-  if (n.resource_type === 'issue' && n.resource_id) return `/hq/issues?item=${n.resource_id}`;
-  if (n.resource_type === 'directive' && n.issue_id) return `/hq/issues?item=${n.issue_id}`;
-  if (n.issue_id) return `/hq/issues?item=${n.issue_id}`;
+  if (n.resource_type === 'issue' && n.resource_id) return `/hq/issues/item?item=${n.resource_id}`;
+  if (n.resource_type === 'directive' && n.issue_id) return `/hq/issues/item?item=${n.issue_id}`;
+  if (n.issue_id) return `/hq/issues/item?item=${n.issue_id}`;
   return '/hq';
 }
 
@@ -47,7 +47,7 @@ export default function NotificationCenter() {
                     items;
 
   async function handleClick(n) {
-    if (!n.is_read) {
+    if (!n.read_at) {
       await notifications.markRead(n.id);
       load();
     }
@@ -102,7 +102,7 @@ export default function NotificationCenter() {
                 style={{
                   padding: '12px 16px',
                   borderBottom: '1px solid #f1f5f9',
-                  background: n.is_read ? 'var(--c-surface)' : (isCrit ? 'var(--c-critical-bg)' : isWarn ? 'var(--c-watch-bg)' : 'var(--c-primary-bg)'),
+                  background: n.read_at ? 'var(--c-surface)' : (isCrit ? 'var(--c-critical-bg)' : isWarn ? 'var(--c-watch-bg)' : 'var(--c-primary-bg)'),
                   display: 'flex',
                   alignItems: 'flex-start',
                   gap: 12,
@@ -110,13 +110,13 @@ export default function NotificationCenter() {
                   textAlign: 'left',
                   cursor: 'pointer',
                   fontFamily: 'inherit',
-                  borderLeft: n.is_read ? '3px solid transparent' : `3px solid ${isCrit ? 'var(--c-critical)' : isWarn ? 'var(--c-watch)' : 'var(--c-primary)'}`,
+                  borderLeft: n.read_at ? '3px solid transparent' : `3px solid ${isCrit ? 'var(--c-critical)' : isWarn ? 'var(--c-watch)' : 'var(--c-primary)'}`,
                 }}
               >
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <div style={{ fontWeight: n.is_read ? 400 : 600, fontSize: 13 }}>{n.title}</div>
-                    {!n.is_read && <span style={{ fontSize: 10, fontWeight: 600, color: isCrit ? 'var(--c-critical)' : isWarn ? 'var(--c-watch)' : 'var(--c-primary)' }}>NEW</span>}
+                    <div style={{ fontWeight: n.read_at ? 400 : 600, fontSize: 13 }}>{n.title}</div>
+                    {!n.read_at && <span style={{ fontSize: 10, fontWeight: 600, color: isCrit ? 'var(--c-critical)' : isWarn ? 'var(--c-watch)' : 'var(--c-primary)' }}>NEW</span>}
                   </div>
                   {n.body && <div style={{ color: 'var(--c-text-2)', fontSize: 12.5 }}>{n.body}</div>}
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11 }}>

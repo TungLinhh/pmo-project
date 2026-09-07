@@ -1,6 +1,7 @@
 // Ingestion: Shop Drawing (file: Shop BOH.xlsx, Shop BPV.xlsx, etc.)
 // PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
 import { findOrCreateZone } from './index.js';
 
@@ -73,7 +74,7 @@ export async function commit(parsed, projectId, zoneCode) {
 
   const report = { doc_type: 'shop_drawing', zone: code, ok: 0, errors: 0, items: [] };
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         await db.upsert('shop_drawings',
           { conflictCols: ['project_id', 'drawing_code'] },
@@ -94,8 +95,7 @@ export async function commit(parsed, projectId, zoneCode) {
         );
         report.ok++;
       } catch (e) {
-        report.errors++;
-        report.items.push({ sheet: sheet.sheet, code: row.drawing_code, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet, row: row.rowIndex ?? idx + 1, ref: row.drawing_code, message: e.message, keep: { code: row.drawing_code } });
       }
     }
   }

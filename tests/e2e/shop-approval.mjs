@@ -1,7 +1,7 @@
-// E2E test L1-L5 (no process.exit)
-import { execSync } from 'node:child_process';
+// E2E test L1-L5 (no process.exit) — env-driven (BASE_URL, PGHOST/PGPORT/…/PSQL_BIN)
+import { psqlQuery, apiBase } from '../tools/env.mjs';
 
-const BASE = 'http://localhost:3000';
+const BASE = apiBase();
 let pass = 0, fail = 0;
 function ok(name, detail) { pass++; console.log(`  ✅ ${name}: ${detail}`); }
 function ng(name, detail) { fail++; console.log(`  ❌ ${name}: ${detail}`); }
@@ -15,9 +15,8 @@ async function api(token, path, opts = {}) {
   return { status: r.status, data };
 }
 
-const psql = '/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/psql';
 function exec(sql) {
-  return execSync(`${psql} -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -tA -c "${sql.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: 'pmo_dev_pwd' } }).toString().trim();
+  return psqlQuery(sql);
 }
 
 console.log('=== Login ===');

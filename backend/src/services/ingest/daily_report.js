@@ -2,6 +2,7 @@
 // File: Báo cáo công việc C20 ngày 23.5.2021.xlsx — each sheet = 1 day
 // PG-only. Mô hình A wizard.
 import { getDb } from '../../db/index.js';
+import { fieldFromDbError, recordFailure } from './failures.js';
 import { readSheet, toDate, toInt, toFloat, toText } from '../../lib/excel.js';
 
 function parseSheetDate(sheetName) {
@@ -123,9 +124,17 @@ export async function commit(parsed, projectId) {
       }
 
       let ok = 0, errors = 0;
+      const failures = [];
+      const fail = (row, ref, message, keep = {}) => {
+        errors++;
+        failures.push({
+          sheet: sheet.sheet, row, field: fieldFromDbError(message),
+          message: String(message || 'unknown error'), ref, ...keep, error: String(message || 'unknown error'),
+        });
+      };
       // Work items: insert all, then update parent_id
       const insertedIds = [];
-      for (const item of sheet.work_items) {
+      for (const [wiIdx, item] of sheet.work_items.entries()) {
         try {
           const r = await db.prepare(`
             INSERT INTO daily_work_items (daily_report_id, parent_id, ordinal, name_vi, blocker_notes, system_type, manpower_rate, start_date, finish_date, lost_days, progress_pct)
@@ -133,7 +142,7 @@ export async function commit(parsed, projectId) {
           `).runAsync(dailyReportId, null, item.ordinal, item.name_vi, item.blocker_notes, item.system_type, item.manpower_rate, item.start_date, item.finish_date, item.lost_days, item.progress_pct);
           insertedIds.push(Number(r.lastInsertRowid));
           ok++;
-        } catch (e) { errors++; }
+        } catch (e) { fail(item.rowIndex ?? wiIdx + 1, item.name_vi || null, e.message, { ordinal: item.ordinal }); }
       }
       for (let i = 0; i < sheet.work_items.length; i++) {
         if (sheet.work_items[i].parent_index !== null && sheet.work_items[i].parent_index !== undefined) {
@@ -143,34 +152,34 @@ export async function commit(parsed, projectId) {
           }
         }
       }
-      for (const m of sheet.materials) {
+      for (const [mIdx, m] of sheet.materials.entries()) {
         try {
           await db.prepare(`
             INSERT INTO daily_materials (daily_report_id, ordinal, name_vi, start_date, finish_date, lost_days, progress_pct)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).runAsync(dailyReportId, m.ordinal, m.name_vi, m.start_date, m.finish_date, m.lost_days, m.progress_pct);
           ok++;
-        } catch (e) { errors++; }
+        } catch (e) { fail(m.rowIndex ?? mIdx + 1, m.name_vi || null, e.message, { ordinal: m.ordinal }); }
       }
-      for (const m of sheet.manpower) {
+      for (const [mpIdx, m] of sheet.manpower.entries()) {
         try {
           await db.prepare(`
             INSERT INTO daily_manpower (daily_report_id, role_name, cumulative_qty, today_qty, consumed_qty)
             VALUES (?, ?, ?, ?, ?)
           `).runAsync(dailyReportId, m.role_name, m.cumulative_qty, m.today_qty, m.consumed_qty);
           ok++;
-        } catch (e) { errors++; }
+        } catch (e) { fail(m.rowIndex ?? mpIdx + 1, m.role_name || null, e.message); }
       }
-      for (const a of sheet.acceptance) {
+      for (const [aIdx, a] of sheet.acceptance.entries()) {
         try {
           await db.prepare(`
             INSERT INTO daily_acceptance (daily_report_id, ordinal, acceptance_type, status)
             VALUES (?, ?, ?, ?)
           `).runAsync(dailyReportId, a.ordinal, a.acceptance_type, a.status);
           ok++;
-        } catch (e) { errors++; }
+        } catch (e) { fail(a.rowIndex ?? aIdx + 1, a.acceptance_type || null, e.message, { ordinal: a.ordinal }); }
       }
-      report.sheets.push({ sheet: sheet.sheet, status: 'OK', daily_report_id: dailyReportId, ok, errors });
+      report.sheets.push({ sheet: sheet.sheet, status: errors ? 'PARTIAL' : 'OK', daily_report_id: dailyReportId, ok, errors, failures });
       report.total.ok += ok;
       report.total.errors += errors;
     } catch (e) {

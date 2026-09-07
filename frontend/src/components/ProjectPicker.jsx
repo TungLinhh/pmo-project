@@ -49,7 +49,9 @@ export default function ProjectPicker({ value, onChange, placeholder = 'Chọn d
     );
   }, [search, projects]);
 
-  const selected = projects.find(p => p.id === value);
+  // URL params arrive as strings while API ids are numbers — normalize once.
+  const numValue = value === null || value === undefined || value === '' ? null : Number(value);
+  const selected = projects.find(p => p.id === numValue);
 
   // Close on outside click
   useEffect(() => {
@@ -69,7 +71,7 @@ export default function ProjectPicker({ value, onChange, placeholder = 'Chọn d
       if (e.key === 'Enter' || e.key === 'ArrowDown') { setOpen(true); e.preventDefault(); }
       return;
     }
-    if (e.key === 'ArrowDown') { setHighlight(h => Math.min(h + 1, filtered.length)); e.preventDefault(); }
+    if (e.key === 'ArrowDown') { setHighlight(h => Math.min(h + 1, Math.max(filtered.length - 1, 0))); e.preventDefault(); }
     else if (e.key === 'ArrowUp') { setHighlight(h => Math.max(h - 1, 0)); e.preventDefault(); }
     else if (e.key === 'Enter') { if (filtered[highlight]) choose(filtered[highlight].id); e.preventDefault(); }
     else if (e.key === 'Escape') { setOpen(false); e.preventDefault(); }
@@ -91,7 +93,7 @@ export default function ProjectPicker({ value, onChange, placeholder = 'Chọn d
         <div className="project-picker-dropdown">
           {allowAll && (
             <div
-              className={`project-picker-item ${value === null ? 'active' : ''}`}
+              className={`project-picker-item ${numValue === null ? 'active' : ''}`}
               onMouseDown={() => choose(null)}
             >
               Tất cả dự án
@@ -103,7 +105,7 @@ export default function ProjectPicker({ value, onChange, placeholder = 'Chọn d
           {filtered.map((p, idx) => (
             <div
               key={p.id}
-              className={`project-picker-item ${value === p.id ? 'active' : ''} ${highlight === idx ? 'highlight' : ''}`}
+              className={`project-picker-item ${numValue === p.id ? 'active' : ''} ${highlight === idx ? 'highlight' : ''}`}
               onMouseDown={() => choose(p.id)}
               onMouseEnter={() => setHighlight(idx)}
             >

@@ -20,7 +20,13 @@ if (!alreadyApplied?.exists) {
   for (const f of files) {
     const sql = readFileSync(join(drizzleDir, f), 'utf8');
     console.log(`  Applying ${f}...`);
-    await db.exec(sql);
+    try {
+      await db.exec(sql);
+    } catch (e) {
+      console.error(`❌ Migration ${f} FAILED — aborting init: ${e.message}`);
+      await closeDb();
+      process.exit(1);
+    }
   }
   console.log(`✓ Applied ${files.length} migration(s)`);
 } else {
@@ -29,10 +35,18 @@ if (!alreadyApplied?.exists) {
 
 // Patch tables that were added after initial drizzle migrations
 // (issues, directives — required by routes but missing from drizzle schema)
+// FATAL on failure: a half-migrated schema is worse than a loud abort.
+// Patches themselves must be additive/idempotent (IF NOT EXISTS) — never DROP.
 const patches = readdirSync(drizzleDir).filter(f => f.match(/^9\d{3}_/)).sort();
 for (const p of patches) {
   const sql = readFileSync(join(drizzleDir, p), 'utf8');
-  await db.exec(sql);
+  try {
+    await db.exec(sql);
+  } catch (e) {
+    console.error(`❌ Patch ${p} FAILED — aborting init (schema may be partial): ${e.message}`);
+    await closeDb();
+    process.exit(1);
+  }
   console.log(`✓ Applied patch ${p}`);
 }
 

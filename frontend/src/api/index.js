@@ -84,7 +84,7 @@ export const directives = {
 
 // Notifications (Bell dropdown)
 export const notifications = {
-  list: (unreadOnly = false) => request(`/notifications${unreadOnly ? '?unread=1' : ''}`),
+  list: (unreadOnly = false) => request(`/notifications${unreadOnly ? '?unread_only=1' : ''}`),
   markRead: (id) => request(`/notifications/${id}/read`, { method: 'POST' }),
   markAllRead: () => request('/notifications/mark-all-read', { method: 'POST' }),
 };
@@ -112,7 +112,7 @@ export const projects = {
 // Shop drawings (state machine 43.3)
 export const shopApi = {
   drawings: (projectId, params) => request(`/projects/${projectId}/shop-drawings${params ? '?' + new URLSearchParams(params) : ''}`),
-  transition: (id, newStatus, reason) => request(`/shop-drawings/${id}/transition`, { method: 'POST', body: { new_status: newStatus, reason } }),
+  transition: (id, newStatus, reason) => request(`/shop-drawings/${id}/transition`, { method: 'POST', body: { to_status: newStatus, comment: reason } }),
 };
 // Alias for backward compat
 export const shop = shopApi;
@@ -139,8 +139,8 @@ export const construction = {
 export const daily = {
   reports: (projectId) => request(`/projects/${projectId}/daily-reports`),
   get: (id) => request(`/daily-reports/${id}/full`),
-  create: (projectId, data) => request(`/projects/${projectId}/daily-reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  addManpower: (id, data) => request(`/daily-reports/${id}/manpower`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  create: (projectId, data) => request(`/projects/${projectId}/daily-reports`, { method: 'POST', body: data }),
+  addManpower: (id, data) => request(`/daily-reports/${id}/manpower`, { method: 'POST', body: data }),
   listPhotos: (id) => request(`/daily-reports/${id}/photos`),
   uploadPhotos: (id, files) => {
     const fd = new FormData();
@@ -176,7 +176,7 @@ export const materialSubmittals = {
   overdue: (projectId) => request(`/projects/${projectId}/material-submittals/overdue`),
   submit: (id) => request(`/material-submittals/${id}/submit`, { method: 'POST' }),
   approve: (id) => request(`/material-submittals/${id}/approve`, { method: 'POST' }),
-  reject: (id, reason) => request(`/material-submittals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) }),
+  reject: (id, reason) => request(`/material-submittals/${id}/reject`, { method: 'POST', body: { reason } }),
   history: (id) => {
     // History = audit log entries
     return request(`/audit?resource_type=material_submittal&resource_id=${id}`);
@@ -208,6 +208,12 @@ export const uploads = {
 };
 
 export const exportApi = {
+  // SCOPE DECISION (P1): xlsx export is OUT of the current demo — backend has no
+  // /api/export routes and services/export.js uses a dead sync API. The buttons
+  // are hidden via ENABLED=false instead of repaired blind: the real HBG/PCR
+  // format hasn't arrived yet, so any format baked now would be wrong anyway.
+  // To re-enable: implement GET /api/export/* routes + flip this flag.
+  ENABLED: false,
   constructionSchedule: (projectId) => `${BASE}/export/construction-schedule/${projectId}.xlsx`,
   shopDrawings: (projectId) => `${BASE}/export/shop-drawings/${projectId}.xlsx`,
   dailyReport: (id) => `${BASE}/export/daily-report/${id}.xlsx`,

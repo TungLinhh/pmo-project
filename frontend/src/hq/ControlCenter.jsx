@@ -307,7 +307,7 @@ export default function ProjectControlCenter() {
         </div>
         <div className="page-header-right">
           <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}><ICON.upload size={13} />Upload Excel</button>
-          <button className="btn" onClick={doExport}><ICON.download size={13} />Xuất báo cáo</button>
+          {exportApi.ENABLED && <button className="btn" onClick={doExport}><ICON.download size={13} />Xuất báo cáo</button>}
         </div>
       </div>
 
@@ -368,7 +368,7 @@ export default function ProjectControlCenter() {
           {/* Construction Progress (mục 6.1) */}
           <div
             className="pillar-card"
-            onClick={() => nav(`/hq/progress${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
+            onClick={() => nav(`/hq/progress${selectedProject ? `?project=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('progress')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -401,7 +401,7 @@ export default function ProjectControlCenter() {
           {/* Shopdrawing (mục 6.2) */}
           <div
             className="pillar-card"
-            onClick={() => nav(`/hq/shop${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
+            onClick={() => nav(`/hq/shop${selectedProject ? `?project=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('shop')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -432,7 +432,7 @@ export default function ProjectControlCenter() {
           {/* Material (mục 6.3) */}
           <div
             className="pillar-card"
-            onClick={() => nav(`/hq/materials${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
+            onClick={() => nav(`/hq/materials${selectedProject ? `?project=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('material')}
             onMouseLeave={() => setHoveredPillar(null)}
           >
@@ -466,7 +466,7 @@ export default function ProjectControlCenter() {
           {/* Payment (mục 6.4) */}
           <div
             className="pillar-card"
-            onClick={() => nav(`/hq/payment${selectedProject ? `?project_id=${selectedProject}` : ''}`)}
+            onClick={() => nav(`/hq/payment${selectedProject ? `?project=${selectedProject}` : ''}`)}
             onMouseEnter={() => setHoveredPillar('payment')}
             onMouseLeave={() => setHoveredPillar(null)}
           >

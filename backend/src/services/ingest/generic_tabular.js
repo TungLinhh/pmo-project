@@ -1,5 +1,6 @@
 // Generic ingestor for tabular files. PG-only. Mô hình A wizard.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, findDataStart } from '../../lib/excel.js';
 
 const COL_COUNT = 10;
@@ -37,7 +38,7 @@ export async function commit(parsed, projectId, options = {}) {
   const docType = parsed.docType || options.docType || 'generic';
   const report = { doc_type: docType, ok: 0, errors: 0, items: [] };
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         const rowData = { project_id: projectId, doc_type: docType, source_sheet: sheet.sheet, ordinal: row.ordinal };
         for (let c = 0; c < COL_COUNT; c++) rowData[`col_${c + 1}`] = row[`col_${c + 1}`];
@@ -47,8 +48,7 @@ export async function commit(parsed, projectId, options = {}) {
         );
         report.ok++;
       } catch (e) {
-        report.errors++;
-        report.items.push({ sheet: sheet.sheet, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet, row: row.rowIndex ?? idx + 1, message: e.message });
       }
     }
   }

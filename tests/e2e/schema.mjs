@@ -1,8 +1,6 @@
-// PG Schema deep verify
-import { execSync } from 'node:child_process';
-const psql = '/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/psql';
-const env = { PGPASSWORD: 'pmo_dev_pwd' };
-const run = (sql) => execSync(`${psql} -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "${sql}"`, { env, encoding: 'utf8' });
+// PG Schema deep verify (env-driven: PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE/PSQL_BIN)
+import { psqlQuery } from '../tools/env.mjs';
+const run = (sql) => psqlQuery(sql, { tuplesOnly: false });
 const issues = [];
 const log = [];
 

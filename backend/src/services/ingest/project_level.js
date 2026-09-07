@@ -1,5 +1,6 @@
 // Ingest a "tổng thể" file (multi-zone summary). PG-only. Mô hình A wizard.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
 import { findZoneByName } from '../../lib/zone_matcher.js';
 import { findOrCreateZone } from './index.js';
@@ -76,7 +77,7 @@ export async function commit(parsed, projectId) {
   const report = { doc_type: docType, ok: 0, errors: 0, items: [], zone_splits: {} };
 
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         if (docType === 'shop_drawing') {
           await db.upsert('shop_drawings',
@@ -97,8 +98,7 @@ export async function commit(parsed, projectId) {
         report.ok++;
         report.zone_splits[sheet.zone_name] = (report.zone_splits[sheet.zone_name] || 0) + 1;
       } catch (e) {
-        report.errors++;
-        report.items.push({ sheet: sheet.sheet, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet, row: row.rowIndex ?? idx + 1, ref: row.drawing_code || row.material_code || row.name_vi || null, message: e.message });
       }
     }
   }

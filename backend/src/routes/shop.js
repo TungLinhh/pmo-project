@@ -118,7 +118,10 @@ router.post('/:id/transition', async (req, res) => {
   const db = getDb();
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be integer' });
-  const { to_status, comment } = req.body || {};
+  const { to_status, comment } = {
+    to_status: req.body?.to_status ?? req.body?.new_status,
+    comment: req.body?.comment ?? req.body?.reason ?? null,
+  };
   const old = await db.prepare('SELECT * FROM shop_drawings WHERE id = $1').getAsync(id);
   if (!old) return res.status(404).json({ error: 'Not found' });
   if (!['SUBMITTED', 'APPROVED', 'REJECTED'].includes(to_status)) {

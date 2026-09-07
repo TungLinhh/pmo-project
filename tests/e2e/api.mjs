@@ -1,7 +1,8 @@
 // E2E test toàn bộ flow PMO MVP
-// Chạy: node tests/e2e/api.mjs (cần backend running ở localhost:3000)
+// Chạy: BASE_URL=http://localhost:3000 node tests/e2e/api.mjs (cần backend running)
+import { apiBase } from '../tools/env.mjs';
 
-const BASE = 'http://localhost:3000';
+const BASE = apiBase();
 const results = [];
 const log = (n, ok, detail = '') => results.push({ n, ok, detail });
 

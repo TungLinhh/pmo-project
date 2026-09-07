@@ -1,6 +1,7 @@
 // Ingestion: Material Supply (file: Vật tư BOH.xlsx, etc.)
 // PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, toFloat, toDate, findDataStart } from '../../lib/excel.js';
 import { findOrCreateZone } from './index.js';
 
@@ -54,7 +55,7 @@ export async function commit(parsed, projectId, zoneCode) {
 
   const report = { doc_type: 'material_supply', zone: code, ok: 0, errors: 0, items: [] };
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         await db.upsert('materials',
           { conflictCols: ['project_id', 'zone_id', 'material_code'] },
@@ -68,8 +69,7 @@ export async function commit(parsed, projectId, zoneCode) {
         );
         report.ok++;
       } catch (e) {
-        report.errors++;
-        report.items.push({ sheet: sheet.sheet, code: row.material_code, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet, row: row.rowIndex ?? idx + 1, ref: row.material_code, message: e.message, keep: { code: row.material_code } });
       }
     }
   }

@@ -18,12 +18,12 @@ function relativeTime(iso) {
 }
 
 function navTargetFor(n) {
-  // Map notification → URL
-  if (n.resource_type === 'issue' && n.resource_id) return `/hq/issues?item=${n.resource_id}`;
-  if (n.resource_type === 'directive' && n.issue_id) return `/hq/issues?item=${n.issue_id}`;
+  // Map notification → URL (detail route is /hq/issues/item?item=)
+  if (n.resource_type === 'issue' && n.resource_id) return `/hq/issues/item?item=${n.resource_id}`;
+  if (n.resource_type === 'directive' && n.issue_id) return `/hq/issues/item?item=${n.issue_id}`;
   if (n.resource_type === 'shop_drawing' && n.resource_id) return `/hq/shop?drawing=${n.resource_id}`;
   if (n.resource_type === 'daily_report') return `/hq`;
-  if (n.issue_id) return `/hq/issues?item=${n.issue_id}`;
+  if (n.issue_id) return `/hq/issues/item?item=${n.issue_id}`;
   return '/hq';
 }
 
@@ -61,7 +61,7 @@ export default function BellDropdown() {
   }, [open]);
 
   async function handleItemClick(n) {
-    if (!n.is_read) {
+    if (!n.read_at) {
       await api.notifications.markRead(n.id);
       load();
     }
@@ -135,10 +135,10 @@ export default function BellDropdown() {
               items.map(n => (
                 <button
                   key={n.id}
-                  className={`bell-item ${n.is_read ? '' : 'unread'} ${n.severity}`}
+                  className={`bell-item ${n.read_at ? '' : 'unread'} ${n.severity}`}
                   onClick={() => handleItemClick(n)}
                 >
-                  {!n.is_read && <span className="dot" />}
+                  {!n.read_at && <span className="dot" />}
                   <div className="content">
                     <div className="title">{n.title}</div>
                     {n.body && <div className="body">{n.body}</div>}

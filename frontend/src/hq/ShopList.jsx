@@ -54,14 +54,14 @@ export default function ShopList() {
           <div className="meta">Pipeline: Draft → Submit → BQL Review → Approval</div>
         </div>
         <div className="page-header-right">
-          <button className="btn btn-secondary" onClick={async () => {
+          {exportApi.ENABLED && <button className="btn btn-secondary" onClick={async () => {
             const r = await fetch(exportApi.shopDrawings(selectedProject), { headers: { Authorization: `Bearer ${getToken()}` } });
             const blob = await r.blob();
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
             a.download = `shop-drawings-${selectedProject}.xlsx`;
             a.click();
-          }}><ICON.download size={13} />Export</button>
+          }}><ICON.download size={13} />Export</button>}
         </div>
       </div>
 

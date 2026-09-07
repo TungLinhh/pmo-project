@@ -38,8 +38,8 @@ export default function Login() {
       setToken(r.token);
       setUser(r.user);
       // TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) — route theo role đơn giản
-      // Site → /field, các role khác → /hq
-      const isSiteRole = r.user.role === 'site';
+      // Site → /field, các role khác → /hq (case-insensitive: DB seeds lowercase, constants uppercase)
+      const isSiteRole = String(r.user.role || '').toLowerCase() === 'site';
       nav(isField || isSiteRole ? '/field' : '/hq', { replace: true });
     } catch (e) {
       setError(e.message || 'Đăng nhập thất bại');

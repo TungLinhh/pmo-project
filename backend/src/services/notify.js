@@ -80,8 +80,13 @@ async function sendZalo(userZaloId, body) {
 
 // Send notification to a user
 // options: { userId, projectId, issueId, title, body, severity, resourceType, resourceId, channels: ['in_app', 'email', 'zalo'] }
+// Backward-compat aliases: `channel` (singular) → channels, `link` accepted
+// (no link column yet — kept in signature so call sites don't churn when one is added).
 export async function notify(options) {
-  const { userId, projectId, issueId, title, body, severity = 'info', resourceType, resourceId, channels = ['in_app'] } = options;
+  const { userId, projectId, issueId, title, body, resourceType, resourceId } = options;
+  let { severity = 'info', channels = ['in_app'] } = options;
+  if (options.channel && !options.channels) channels = [options.channel];
+  severity = String(severity || 'info').toLowerCase();
   if (!userId) return;
   const db = getDb();
   const results = {};

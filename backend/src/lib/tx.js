@@ -10,13 +10,13 @@
 //   });
 
 import pg from 'pg';
+import { buildDatabaseUrl } from '../db/index.js';
 const { Pool } = pg;
 
 let _pool = null;
 export function getPool() {
   if (!_pool) {
-    const url = process.env.DATABASE_URL || 'postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5433/pmo';
-    _pool = new Pool({ connectionString: url, max: 10 });
+    _pool = new Pool({ connectionString: buildDatabaseUrl(), max: 10 });
   }
   return _pool;
 }

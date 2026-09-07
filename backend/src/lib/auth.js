@@ -4,14 +4,38 @@
 //   router.get('/api/foo', requireAuth, requireRole('admin', 'ceo'), handler)  — yêu cầu role
 //
 // req.session được set bởi /api/auth/login (in-memory, key: sessionId → user)
-// Phase 2: chuyển sang JWT + PG session
+// Phase 2 (inevitable, not yet): JWT + PG session so login survives restart
+// and works across replicas. Until then: in-memory WITH expiry (no immortal
+// sessions) and fail-closed reads (no admin fallback).
+import { randomBytes } from 'node:crypto';
 
-const SESSIONS = new Map(); // sessionId → user
-let _sessionId = 0;
+function sessionTtlMs() {
+  const v = Number(process.env.SESSION_TTL_MS);
+  return Number.isFinite(v) && v > 0 ? v : 24 * 3600 * 1000; // default 24h
+}
+
+// sessionId → { user, expiresAt }
+const SESSIONS = new Map();
+
+function isExpired(entry) {
+  return !entry || entry.expiresAt <= Date.now();
+}
+
+// Opportunistic sweep so expired sessions don't accumulate.
+let _lastSweep = 0;
+function sweepExpired() {
+  const now = Date.now();
+  if (now - _lastSweep < 60_000) return;
+  _lastSweep = now;
+  for (const [k, v] of SESSIONS) {
+    if (isExpired(v)) SESSIONS.delete(k);
+  }
+}
 
 export function createSession(user) {
-  const id = `s_${++_sessionId}_${Date.now()}`;
-  SESSIONS.set(id, user);
+  sweepExpired();
+  const id = `s_${randomBytes(16).toString('hex')}_${Date.now()}`;
+  SESSIONS.set(id, { user, expiresAt: Date.now() + sessionTtlMs() });
   return id;
 }
 
@@ -20,7 +44,13 @@ export function destroySession(id) {
 }
 
 export function getSessionUser(id) {
-  return SESSIONS.get(id) || null;
+  const entry = SESSIONS.get(id);
+  if (!entry) return null;
+  if (isExpired(entry)) {
+    SESSIONS.delete(id);
+    return null;
+  }
+  return entry.user;
 }
 
 export function listSessions() {
@@ -33,7 +63,7 @@ export function readTokenUser(req) {
   if (!auth || !auth.startsWith('Bearer ')) return null;
   const token = auth.slice(7);
   // Token = sessionId (simple) or JWT (future)
-  return SESSIONS.get(token) || null;
+  return getSessionUser(token);
 }
 
 // requireAuth: 401 nếu chưa đăng nhập
@@ -63,6 +93,8 @@ export function requireRole(...roles) {
 }
 
 // Helper: lấy user hiện tại (dùng trong route, optional)
+// Fail-closed: trả về null khi không có auth — caller phải xử lý 401.
+// (Trước đây fallback về admin id=1, cho phép leo thang đặc quyền nếu route quên requireAuth.)
 export function currentUser(req) {
   if (req.user) {
     return {
@@ -71,10 +103,5 @@ export function currentUser(req) {
       role: req.user.role || 'admin',
     };
   }
-  // Fallback khi không có auth (edge case, chỉ dùng trong test/internal)
-  return {
-    id: req.session?.user_id || 1,
-    name: req.session?.user_name || 'System',
-    role: req.session?.role || 'admin',
-  };
+  return null;
 }

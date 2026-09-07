@@ -177,11 +177,11 @@ export function FieldSync() {
 // ===== Project / Area hierarchy (mục 43.8) =====
 export function ProjectWbsSelection() {
   const [step, setStep] = useState(1);
-  const [projects, setProjects] = useState([]);
+  const [projectList, setProjectList] = useState([]);
   const [hierarchy, setHierarchy] = useState([]);
   const [selected, setSelected] = useState(null);
   useEffect(() => {
-    projectsApi.list().then(d => setProjects(Array.isArray(d) ? d : [])).catch(() => {});
+    projects.list().then(d => setProjectList(Array.isArray(d) ? d : [])).catch(() => {});
   }, []);
   useEffect(() => {
     if (step === 2 && selected) {
@@ -195,13 +195,13 @@ export function ProjectWbsSelection() {
         <h2>Project / Area</h2>
         {step === 1 ? (
           <>
-            <p style={{ color: 'var(--c-text-2)', fontSize: 12, marginBottom: 12 }}>Bước 1: Chọn dự án ({projects.length} projects)</p>
-            {projects.map(p => (
+            <p style={{ color: 'var(--c-text-2)', fontSize: 12, marginBottom: 12 }}>Bước 1: Chọn dự án ({projectList.length} projects)</p>
+            {projectList.map(p => (
               <button key={p.id} className="field-button" onClick={() => { setSelected(p.id); setStep(2); }}>
                 {p.code} <span style={{ fontSize: 11, opacity: 0.7 }}>· {p.name_vi || p.name_en}</span>
               </button>
             ))}
-            {projects.length === 0 && <div className="empty">Đang tải...</div>}
+            {projectList.length === 0 && <div className="empty">Đang tải...</div>}
           </>
         ) : (
           <>

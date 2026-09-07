@@ -12,7 +12,7 @@ router.use(requireAuth);
 router.get('/queue', async (req, res) => {
   const db = getDb();
   const rows = await db.prepare(`
-    SELECT * FROM sync_queue
+    SELECT * FROM offline_sync_queue
     WHERE user_id = ? AND status = 'PENDING'
     ORDER BY created_at ASC LIMIT 100
   `).allAsync(req.user.id);
@@ -25,28 +25,31 @@ router.post('/resolve', async (req, res) => {
   if (!queue_id || !['SERVER', 'CLIENT'].includes(winner)) {
     return res.status(400).json({ error: 'queue_id and winner=SERVER|CLIENT required' });
   }
-  const item = await db.prepare('SELECT * FROM sync_queue WHERE id = ?').getAsync(queue_id);
+  const item = await db.prepare('SELECT * FROM offline_sync_queue WHERE id = ?').getAsync(queue_id);
   if (!item) return res.status(404).json({ error: 'Not found' });
-  const resolution = resolveConflict({ client_payload: item.payload, server_record: item.server_record });
+  // Last-write-wins advisory: client_timestamp vs server receipt (synced_at || created_at).
+  // Explicit `winner` decides and is recorded; timestamp comparison is returned for transparency.
+  const comparison = resolveConflict(item.client_timestamp, item.synced_at || item.created_at);
+  const conflictResolution = winner === 'CLIENT' ? 'CLIENT_NEWER' : 'SERVER_NEWER';
   if (winner === 'SERVER' && item.server_record_id) {
     try {
       await withAudit(req, {
         action: 'SYNC_RESOLVE', resourceType: item.resource_type, resourceId: item.server_record_id,
-        context: { queue_id, winner },
-        before: item.payload,
-        after: item.server_record,
+        context: { queue_id, winner, comparison: comparison.winner },
+        before: item.resource_json,
+        after: item.resource_json,
         note: `Resolve sync conflict (winner=SERVER) for queue #${queue_id}`,
       }, async (client) => {
-        await client.query(`UPDATE sync_queue SET status = 'RESOLVED', resolution = 'SERVER', resolved_at = now(), resolved_by = $1 WHERE id = $2`, [req.user.id, queue_id]);
+        await client.query(`UPDATE offline_sync_queue SET status = 'RESOLVED', conflict_resolution = $1, superseded_at = now() WHERE id = $2`, [conflictResolution, queue_id]);
         return { ok: true };
       });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
   } else {
-    await db.prepare(`UPDATE sync_queue SET status = 'RESOLVED', resolution = 'CLIENT', resolved_at = now(), resolved_by = ? WHERE id = ?`).runAsync(req.user.id, queue_id);
+    await db.prepare(`UPDATE offline_sync_queue SET status = 'RESOLVED', conflict_resolution = ?, superseded_at = now() WHERE id = ?`).runAsync(conflictResolution, queue_id);
   }
-  res.json({ ok: true, resolution });
+  res.json({ ok: true, winner, comparison, conflict_resolution: conflictResolution });
 });
 
 export default router;

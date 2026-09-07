@@ -24,15 +24,15 @@ export default function Approval() {
   async function load() {
     setLoading(true);
     try {
-      // Shop drawings in REVIEW
-      const shopResp = await fetch('/api/projects/1/shop-drawings?status=REVIEW&limit=20', {
+      // Shop drawings awaiting approval (SUBMITTED = sent for approval in this workflow)
+      const shopResp = await fetch('/api/shop-drawings?project_id=1&status=SUBMITTED&limit=20', {
         headers: { Authorization: `Bearer ${getToken()}` }
       }).then(r => r.json()).catch(() => []);
       setShopItems(Array.isArray(shopResp) ? shopResp : []);
 
       // Material submittals
       const subResp = await materials.overdue(1).catch(() => []);
-      const subAll = await fetch('/api/projects/1/material-submittals?status=SUBMITTED&limit=20', {
+      const subAll = await fetch('/api/material-submittals?project_id=1&status=SUBMITTED&limit=20', {
         headers: { Authorization: `Bearer ${getToken()}` }
       }).then(r => r.json()).catch(() => []);
       const allSub = [...(Array.isArray(subResp) ? subResp : []), ...(Array.isArray(subAll) ? subAll : [])];

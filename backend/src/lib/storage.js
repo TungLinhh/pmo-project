@@ -12,11 +12,15 @@ mkdirSync(UPLOADS_DIR, { recursive: true });
 
 export function saveFile(buffer, originalFilename) {
   const hash = createHash('sha256').update(buffer).digest('hex');
-  const ext = originalFilename.split('.').pop();
+  // Filenames from site reports can lack an extension — default to .bin.
+  const parts = String(originalFilename || 'upload.bin').split('.');
+  const ext = parts.length > 1 ? parts.pop() : 'bin';
   const key = `${hash.substring(0, 16)}_${Date.now()}.${ext}`;
   const fullPath = join(UPLOADS_DIR, key);
   writeFileSync(fullPath, buffer);
   const size = statSync(fullPath).size;
+  // Canonical shape: { key, fullPath, hash, size }.
+  // DB rows store `key` (portable); resolve disk path via getFilePath(key).
   return { key, fullPath, hash, size };
 }
 

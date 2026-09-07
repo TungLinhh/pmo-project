@@ -1,5 +1,5 @@
 // OTD (On-Time Delivery) calculation endpoint
-// Decision 2026-09-05: OTD threshold = bám sát kế hoạch (planned ≤ actual_end ≤ planned_end + grace_days)
+// Decision 2026-09-05: OTD threshold = bám sát kế hoạch (plan_end_date ≤ actual_end_date ≤ plan_end_date + grace_days)
 // Returns: { otd_pct, total_items, on_time, late, by_zone, trend }
 // Mount: /api/projects/:id/otd
 
@@ -25,56 +25,56 @@ router.get('/', async (req, res) => {
   })();
 
   // OTD = số work item hoàn thành ON-TIME / tổng số work item có planned
-  //  - on-time: actual_end IS NOT NULL AND actual_end <= planned_end + grace_days
-  //  - on-time: actual_end IS NULL AND CURRENT_DATE <= planned_end + grace_days (vẫn trong hạn)
+  //  - on-time: actual_end_date IS NOT NULL AND actual_end_date <= plan_end_date + grace_days
+  //  - on-time: actual_end_date IS NULL AND CURRENT_DATE <= plan_end_date + grace_days (vẫn trong hạn)
   const total = await db.prepare(`
     SELECT COUNT(*) as c FROM construction_schedule_items
-    WHERE project_id = $1 AND planned_end IS NOT NULL
-      AND planned_end BETWEEN $2 AND $3
+    WHERE project_id = $1 AND plan_end_date IS NOT NULL
+      AND plan_end_date BETWEEN $2 AND $3
   `).getAsync(req.params.id, from, to);
 
   const onTime = await db.prepare(`
     SELECT COUNT(*) as c FROM construction_schedule_items
-    WHERE project_id = $1 AND planned_end IS NOT NULL
-      AND planned_end BETWEEN $2 AND $3
+    WHERE project_id = $1 AND plan_end_date IS NOT NULL
+      AND plan_end_date BETWEEN $2 AND $3
       AND (
-        (actual_end IS NOT NULL AND actual_end <= planned_end + ($4 || ' days')::INTERVAL)
-        OR (actual_end IS NULL AND CURRENT_DATE <= planned_end + ($4 || ' days')::INTERVAL)
+        (actual_end_date IS NOT NULL AND actual_end_date <= plan_end_date + ($4 || ' days')::INTERVAL)
+        OR (actual_end_date IS NULL AND CURRENT_DATE <= plan_end_date + ($4 || ' days')::INTERVAL)
       )
   `).getAsync(req.params.id, from, to, String(graceDays));
 
   const late = await db.prepare(`
     SELECT COUNT(*) as c FROM construction_schedule_items
-    WHERE project_id = $1 AND planned_end IS NOT NULL
-      AND planned_end BETWEEN $2 AND $3
-      AND (actual_end IS NOT NULL AND actual_end > planned_end + ($4 || ' days')::INTERVAL)
+    WHERE project_id = $1 AND plan_end_date IS NOT NULL
+      AND plan_end_date BETWEEN $2 AND $3
+      AND (actual_end_date IS NOT NULL AND actual_end_date > plan_end_date + ($4 || ' days')::INTERVAL)
   `).getAsync(req.params.id, from, to, String(graceDays));
 
   // By zone breakdown
   const byZone = await db.prepare(`
     SELECT zone_id, z.code AS zone_code,
       COUNT(*) as total,
-      SUM(CASE WHEN (actual_end IS NOT NULL AND actual_end <= planned_end + ($4 || ' days')::INTERVAL)
-                OR (actual_end IS NULL AND CURRENT_DATE <= planned_end + ($4 || ' days')::INTERVAL)
+      SUM(CASE WHEN (actual_end_date IS NOT NULL AND actual_end_date <= plan_end_date + ($4 || ' days')::INTERVAL)
+                OR (actual_end_date IS NULL AND CURRENT_DATE <= plan_end_date + ($4 || ' days')::INTERVAL)
               THEN 1 ELSE 0 END) as on_time
     FROM construction_schedule_items csi
     LEFT JOIN zones z ON z.id = csi.zone_id
-    WHERE csi.project_id = $1 AND csi.planned_end IS NOT NULL
-      AND csi.planned_end BETWEEN $2 AND $3
+    WHERE csi.project_id = $1 AND csi.plan_end_date IS NOT NULL
+      AND csi.plan_end_date BETWEEN $2 AND $3
     GROUP BY zone_id, z.code
     ORDER BY z.code
   `).allAsync(req.params.id, from, to, String(graceDays));
 
   // Trend (last 6 months, monthly)
   const trend = await db.prepare(`
-    SELECT date_trunc('month', planned_end) as month,
+    SELECT date_trunc('month', plan_end_date) as month,
       COUNT(*) as total,
-      SUM(CASE WHEN (actual_end IS NOT NULL AND actual_end <= planned_end + ($2 || ' days')::INTERVAL)
-                OR (actual_end IS NULL AND CURRENT_DATE <= planned_end + ($2 || ' days')::INTERVAL)
+      SUM(CASE WHEN (actual_end_date IS NOT NULL AND actual_end_date <= plan_end_date + ($2 || ' days')::INTERVAL)
+                OR (actual_end_date IS NULL AND CURRENT_DATE <= plan_end_date + ($2 || ' days')::INTERVAL)
               THEN 1 ELSE 0 END) as on_time
     FROM construction_schedule_items
-    WHERE project_id = $1 AND planned_end IS NOT NULL
-      AND planned_end >= CURRENT_DATE - INTERVAL '6 months'
+    WHERE project_id = $1 AND plan_end_date IS NOT NULL
+      AND plan_end_date >= CURRENT_DATE - INTERVAL '6 months'
     GROUP BY 1
     ORDER BY 1
   `).allAsync(req.params.id, String(graceDays));

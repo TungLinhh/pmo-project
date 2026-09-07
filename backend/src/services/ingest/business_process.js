@@ -1,6 +1,7 @@
 // Ingestion: Business Process (file: quy trình thực hiện dự án.xlsx)
 // PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, findDataStart } from '../../lib/excel.js';
 
 const HEADER_KEYWORDS = ['stt', 'tt', 'tiến trình', 'quy trình', 'bước'];
@@ -45,7 +46,7 @@ export async function commit(parsed, tenantId, processCode = 'project_execution'
 
   const report = { doc_type: 'business_process', ok: 0, errors: 0, items: [], process_id: processId };
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         await db.upsert('business_process_steps',
           { conflictCols: ['process_id', 'ordinal'] },
@@ -57,8 +58,7 @@ export async function commit(parsed, tenantId, processCode = 'project_execution'
         report.ok++;
         report.items.push({ ordinal: row.ordinal, name: row.name_vi });
       } catch (e) {
-        report.errors++;
-        report.items.push({ ordinal: row.ordinal, name: row.name_vi, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet ?? null, row: row.rowIndex ?? idx + 1, ref: row.name_vi, message: e.message, keep: { ordinal: row.ordinal, name: row.name_vi } });
       }
     }
   }

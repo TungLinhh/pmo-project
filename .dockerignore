@@ -23,8 +23,9 @@ playwright-report/
 **/Dockerfile
 **/docker-compose*.yml
 **/.dockerignore
-docker-entrypoint.sh
 docker-compose.yml
+# NOTE: docker-entrypoint.sh must stay IN the build context —
+# Dockerfile COPYs it to /usr/local/bin/. Do not ignore it.
 
 # ===== Node / dependencies =====
 node_modules

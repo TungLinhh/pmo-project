@@ -32,7 +32,7 @@ jobs:
       - name: Build frontend
         run: cd frontend && npm run build
       - name: Apply migrations
-        run: PGPASSWORD=${{ secrets.PG_PASSWORD }} psql -h 127.0.0.1 -U pmo_user -d pmo -f backend/drizzle/9998_align_schema_with_routes.sql
+        run: node backend/src/db/init.js
       - name: Restart service
         uses: appleboy/ssh-action@v1
         with:

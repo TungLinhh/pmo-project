@@ -1,12 +1,8 @@
-// Schema-aware query audit v3 - only routes/ + show context
-import { execSync } from 'node:child_process';
+// Schema-aware query audit v3 - only routes/ + show context (env-driven DB + repo root)
 import fs from 'node:fs';
 import path from 'node:path';
-
-const psql = '/home/linuxbrew/.linuxbrew/Cellar/postgresql@16/16.15/bin/psql';
-function psqlQuery(sql) {
-  return execSync(`${psql} -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -tA -c "${sql.replace(/"/g, "'")}"`, { env: { ...process.env, PGPASSWORD: 'pmo_dev_pwd' } }).toString().trim();
-}
+import { fileURLToPath } from 'node:url';
+import { psqlQuery } from './env.mjs';
 
 const tables = psqlQuery("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'").split('\n').filter(Boolean);
 const schema = {};
@@ -15,7 +11,7 @@ for (const t of tables) {
   schema[t] = new Set(cols);
 }
 
-const root = '/home/vutun/pmo_project/backend/src';
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'backend', 'src');
 const files = [];
 function walk(d) {
   for (const f of fs.readdirSync(d)) {

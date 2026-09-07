@@ -17,6 +17,8 @@ const TABLES = {
   teams: 'teams',
   cost_codes: 'cost_codes',
   resources: 'resources',
+  business_processes: 'business_processes',
+  'business-processes': 'business_processes',
 };
 
 router.get('/:resource', async (req, res) => {

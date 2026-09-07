@@ -23,7 +23,9 @@ CREATE INDEX IF NOT EXISTS issues_project_idx ON issues (project_id);
 CREATE INDEX IF NOT EXISTS issues_status_idx ON issues (status);
 CREATE INDEX IF NOT EXISTS issues_severity_idx ON issues (severity);
 
--- Directives (related to issues, also missing in PG)
+-- Directives is canonically defined in 9998 (runs first). This block is a
+-- legacy-fallback no-op when 9998 already created the table; it only helps
+-- databases where 9999 was applied without 9998. Do NOT add conflicting columns here.
 CREATE TABLE IF NOT EXISTS directives (
   id SERIAL PRIMARY KEY,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id),

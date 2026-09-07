@@ -1,6 +1,7 @@
 // Ingestion: Subcontractor Directory (file: Quy trình thuê thầu phụ, tổ đội.xlsx)
 // PG-only. Mô hình A wizard: parse() returns rows, commit() inserts them.
 import { getDb } from '../../db/index.js';
+import { recordFailure } from './failures.js';
 import { readSheet, toText, toInt, findDataStart } from '../../lib/excel.js';
 
 const HEADER_KEYWORDS = ['stt', 'tt', 'no', 'no.'];
@@ -37,7 +38,7 @@ export async function commit(parsed, projectId) {
   const db = getDb();
   const report = { doc_type: 'subcontractor_directory', ok: 0, errors: 0, items: [] };
   for (const sheet of parsed.sheets) {
-    for (const row of sheet.rows) {
+    for (const [idx, row] of sheet.rows.entries()) {
       try {
         await db.upsert('subcontractors',
           { conflictCols: ['tenant_id', 'name'] },
@@ -45,8 +46,7 @@ export async function commit(parsed, projectId) {
         );
         report.ok++;
       } catch (e) {
-        report.errors++;
-        report.items.push({ sheet: sheet.sheet, name: row.name, error: e.message });
+        recordFailure(report, { sheet: sheet.sheet, row: row.rowIndex ?? idx + 1, ref: row.name, message: e.message, keep: { name: row.name } });
       }
     }
   }

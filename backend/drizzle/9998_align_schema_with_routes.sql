@@ -10,9 +10,9 @@ ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS old_value TEXT;
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS new_value TEXT;
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS note TEXT;
 
--- Drop and recreate directives with full schema (matching src/db/schema.sql)
-DROP TABLE IF EXISTS directives CASCADE;
-CREATE TABLE directives (
+-- directives: canonical schema expected by routes/directives.js (additive only — never DROP).
+-- 9998 runs before 9999, so this CREATE wins; 9999's CREATE IF NOT EXISTS becomes a no-op.
+CREATE TABLE IF NOT EXISTS directives (
   id SERIAL PRIMARY KEY,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id),
   project_id INTEGER NOT NULL REFERENCES projects(id),
@@ -23,6 +23,14 @@ CREATE TABLE directives (
   notify_to_user_ids TEXT,
   created_at TIMESTAMP NOT NULL DEFAULT now()
 );
+-- Heal legacy 9999-shaped table (issue_id NOT NULL, issued_by, no project_id/from_user_id):
+-- make issue_id nullable (directives can exist without an issue) and add missing columns.
+ALTER TABLE directives ALTER COLUMN issue_id DROP NOT NULL;
+ALTER TABLE directives ADD COLUMN IF NOT EXISTS tenant_id INTEGER;
+ALTER TABLE directives ADD COLUMN IF NOT EXISTS project_id INTEGER;
+ALTER TABLE directives ADD COLUMN IF NOT EXISTS from_user_id INTEGER;
+ALTER TABLE directives ADD COLUMN IF NOT EXISTS from_user_name TEXT;
+ALTER TABLE directives ADD COLUMN IF NOT EXISTS notify_to_user_ids TEXT;
 CREATE INDEX IF NOT EXISTS directives_issue_idx ON directives (issue_id);
 CREATE INDEX IF NOT EXISTS directives_project_idx ON directives (project_id);
 

@@ -15,6 +15,7 @@ export async function withAudit(req, auditMeta, businessFn) {
   if (typeof businessFn !== 'function') {
     const db = getDb();
     const u = currentUser(req);
+    if (!u) throw new Error('Unauthorized: no session user');
     await db.auditLog?.({
       userId: u.id, userName: u.name, userRole: u.role,
       ...auditMeta,
@@ -27,6 +28,7 @@ export async function withAudit(req, auditMeta, businessFn) {
     const result = await businessFn(client);
     // Audit log cùng transaction
     const u = currentUser(req);
+    if (!u) throw new Error('Unauthorized: no session user');
     await client.query(
       `INSERT INTO audit_log (tenant_id, user_id, user_name, action, resource_type, resource_id, context, before, after, field_changes, actor_role, note)
        VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,

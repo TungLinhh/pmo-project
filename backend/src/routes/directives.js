@@ -41,11 +41,14 @@ router.post('/', requireRole('ceo', 'admin', 'pmo'), async (req, res) => {
   });
   // Send notifications (async, don't block response)
   if (notify_to_user_ids?.length) {
-    notifyMany(req, notify_to_user_ids, {
+    notifyMany(notify_to_user_ids, {
       title: `Chỉ thị mới: ${project_id}`,
       body: body.slice(0, 200),
-      link: `/hq/projects/${project_id}`,
-      severity: 'INFO',
+      projectId: project_id,
+      issueId: issue_id || null,
+      resourceType: 'directive',
+      resourceId: created?.id ?? null,
+      severity: 'info',
     }).catch(e => console.error('[notify] directive failed:', e.message));
   }
   res.json(created);

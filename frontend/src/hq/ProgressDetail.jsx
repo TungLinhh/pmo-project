@@ -70,7 +70,7 @@ export default function ProgressDetail() {
           <div className="meta">Construction schedule · {total} items · {zones.length} zones</div>
         </div>
         <div className="page-header-right">
-          <button className="btn btn-secondary" onClick={download}><ICON.download size={13} />Export Excel</button>
+          {exportApi.ENABLED && <button className="btn btn-secondary" onClick={download}><ICON.download size={13} />Export Excel</button>}
         </div>
       </div>
 
@@ -133,7 +133,7 @@ export default function ProgressDetail() {
                 const h = healthOf(item);
                 const cls = h === HEALTH.OVERDUE || h === HEALTH.CRITICAL ? 'critical' : h === HEALTH.BEHIND ? 'exception' : '';
                 return (
-                  <tr key={item.id} className={cls} onClick={() => nav(`/hq/issues?item=${item.id}`)} style={{ cursor: 'pointer' }}>
+                  <tr key={item.id} className={cls} onClick={() => nav(`/hq/issues/item?item=${item.id}`)} style={{ cursor: 'pointer' }}>
                     <td><code>{item.zone_code}</code></td>
                     <td>{item.level_roman || item.level_arabic || '—'}</td>
                     <td style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name_vi || '—'}</td>

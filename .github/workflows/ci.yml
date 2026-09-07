@@ -42,7 +42,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: pmo_user
-          POSTGRES_PASSWORD: pmo_dev_pwd
+          POSTGRES_PASSWORD: ${{ env.PG_PASSWORD }}
           POSTGRES_DB: pmo
         ports: ['5433:5432']
         options: >-
@@ -51,7 +51,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://pmo_user:***@127.0.0.1:5433/pmo
+      # Single source of truth: top-level PG_PASSWORD. Backend resolves PG via
+      # DB_* parts (same path as docker-compose); tests via PGHOST/PGPORT/….
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5433'
+      DB_USER: pmo_user
+      DB_PASSWORD: ${{ env.PG_PASSWORD }}
+      DB_NAME: pmo
+      PGHOST: 127.0.0.1
+      PGPORT: '5433'
+      PGUSER: pmo_user
+      PGPASSWORD: ${{ env.PG_PASSWORD }}
+      PGDATABASE: pmo
+      BASE_URL: http://localhost:3000
     defaults:
       run:
         working-directory: backend
@@ -63,9 +75,7 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: Apply migrations
-        run: |
-          PGPASSWORD=$PG_PASSWORD psql -h 127.0.0.1 -p 5433 -U $PG_USER -d $PG_DB -f drizzle/9999_add_issues_table.sql
-          PGPASSWORD=$PG_PASSWORD psql -h 127.0.0.1 -p 5433 -U $PG_USER -d $PG_DB -f drizzle/9998_align_schema_with_routes.sql
+        run: node src/db/init.js
       - name: Start backend
         run: |
           node src/index.js &
@@ -103,7 +113,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist/
+          path: dist/
           retention-days: 7
 
   schema-audit:
@@ -114,7 +124,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: pmo_user
-          POSTGRES_PASSWORD: pmo_dev_pwd
+          POSTGRES_PASSWORD: ${{ env.PG_PASSWORD }}
           POSTGRES_DB: pmo
         ports: ['5433:5432']
         options: >-
@@ -122,15 +132,23 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5433'
+      DB_USER: pmo_user
+      DB_PASSWORD: ${{ env.PG_PASSWORD }}
+      DB_NAME: pmo
+      PGHOST: 127.0.0.1
+      PGPORT: '5433'
+      PGUSER: pmo_user
+      PGPASSWORD: ${{ env.PG_PASSWORD }}
+      PGDATABASE: pmo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install Playwright
-        run: npx playwright install --with-deps chromium
+      - name: Apply migrations (same ordered init.js as everywhere)
+        run: node backend/src/db/init.js
       - name: Run schema audit
-        env:
-          PGHOST: 127.0.0.1
-          PGPORT: '5433'
         run: node tests/tools/schema-audit.mjs || echo "audit found issues — see logs"

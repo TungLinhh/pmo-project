@@ -85,7 +85,8 @@ router.get('/:id/zones', async (req, res) => {
 
 router.get('/:id/materials', async (req, res) => {
   const db = getDb();
-  res.json(await db.prepare('SELECT * FROM materials WHERE project_id = ? ORDER BY id').allAsync(req.params.id));
+  const lim = Math.min(parseInt(req.query.limit) || 200, 500);
+  res.json(await db.prepare('SELECT * FROM materials WHERE project_id = ? ORDER BY id LIMIT ?').allAsync(req.params.id, lim));
 });
 
 router.get('/:id/contracts', async (req, res) => {
@@ -105,7 +106,15 @@ router.get('/:id/daily-reports', async (req, res) => {
 
 router.get('/:id/issues', async (req, res) => {
   const db = getDb();
-  res.json(await db.prepare('SELECT * FROM issues WHERE project_id = ? ORDER BY created_at DESC LIMIT 200').allAsync(req.params.id));
+  const { status, severity, category } = req.query;
+  const where = ['project_id = $1'];
+  const params = [req.params.id];
+  let i = 2;
+  if (status) { where.push(`status = $${i++}`); params.push(status); }
+  if (severity) { where.push(`severity = $${i++}`); params.push(severity); }
+  if (category) { where.push(`category = $${i++}`); params.push(category); }
+  params.push(Math.min(parseInt(req.query.limit) || 200, 500));
+  res.json(await db.prepare(`SELECT * FROM issues WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $${i}`).allAsync(...params));
 });
 
 router.post('/:id/issues', async (req, res) => {
@@ -115,12 +124,29 @@ router.post('/:id/issues', async (req, res) => {
 
 router.get('/:id/construction-schedule', async (req, res) => {
   const db = getDb();
-  res.json(await db.prepare('SELECT * FROM construction_schedule_items WHERE project_id = $1 ORDER BY plan_start_date').allAsync(req.params.id));
+  const { zone, search, status } = req.query;
+  const where = ['csi.project_id = $1'];
+  const params = [req.params.id];
+  let i = 2;
+  if (zone) { where.push(`(z.code = $${i} OR csi.zone_id = $${i + 1})`); params.push(zone, /^\d+$/.test(zone) ? Number(zone) : -1); i += 2; }
+  if (status) { where.push(`csi.status = $${i++}`); params.push(status); }
+  if (search) { where.push(`(csi.name_vi ILIKE $${i} OR csi.name_en ILIKE $${i} OR csi.source_sheet ILIKE $${i})`); params.push(`%${search}%`); i++; }
+  params.push(Math.min(parseInt(req.query.limit) || 2000, 5000));
+  res.json(await db.prepare(
+    `SELECT csi.*, z.code AS zone_code FROM construction_schedule_items csi LEFT JOIN zones z ON z.id = csi.zone_id WHERE ${where.join(' AND ')} ORDER BY csi.plan_start_date LIMIT $${i}`
+  ).allAsync(...params));
 });
 
 router.get('/:id/shop-drawings', async (req, res) => {
   const db = getDb();
-  res.json(await db.prepare('SELECT * FROM shop_drawings WHERE project_id = ? ORDER BY id DESC').allAsync(req.params.id));
+  const { status, search } = req.query;
+  const where = ['project_id = $1'];
+  const params = [req.params.id];
+  let i = 2;
+  if (status) { where.push(`status = $${i++}`); params.push(status); }
+  if (search) { where.push(`(drawing_code ILIKE $${i} OR name_vi ILIKE $${i} OR name_en ILIKE $${i})`); params.push(`%${search}%`); i++; }
+  params.push(Math.min(parseInt(req.query.limit) || 200, 500));
+  res.json(await db.prepare(`SELECT * FROM shop_drawings WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT $${i}`).allAsync(...params));
 });
 
 router.get('/:id/material-breakdown', async (req, res) => {

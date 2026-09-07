@@ -26,7 +26,20 @@ import { mkdirSync } from 'node:fs';
 
 const { Pool } = pg;
 
-const PG_URL = process.env.DATABASE_URL || 'postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5433/pmo';
+// DATABASE_URL wins when set; otherwise build from DB_* parts so
+// docker-compose / production envs (DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME)
+// work without extra wiring. Defaults match README local dev.
+export function buildDatabaseUrl() {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+  const user = process.env.DB_USER || 'pmo_user';
+  const pass = process.env.DB_PASSWORD || 'pmo_dev_pwd';
+  const host = process.env.DB_HOST || '127.0.0.1';
+  const port = process.env.DB_PORT || '5433';
+  const name = process.env.DB_NAME || 'pmo';
+  return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${name}`;
+}
+
+const PG_URL = buildDatabaseUrl();
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let _pgPool = null;

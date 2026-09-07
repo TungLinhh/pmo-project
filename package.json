@@ -20,7 +20,7 @@
     "test:shop": "node tests/e2e/shop-approval.mjs",
     "test:schema": "node tests/e2e/schema.mjs",
     "test:browser": "node tests/e2e/browser.mjs",
-    "test:all": "npm test && node tests/tools/schema-audit.mjs",
+    "test:all": "npm test && npm run test:browser && node tests/tools/schema-audit.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "audit:schema": "node tests/tools/schema-audit.mjs"
   },

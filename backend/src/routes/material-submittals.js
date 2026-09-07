@@ -129,12 +129,19 @@ router.post('/:id/approve', async (req, res) => {
   }
 });
 
-// List submittals for project
+// List submittals for project (supports ?project_id=&status=&limit=)
 router.get('/', async (req, res) => {
   const db = getDb();
+  const { project_id, status } = req.query;
+  if (!project_id) return res.status(400).json({ error: 'project_id required' });
+  const where = ['project_id = $1'];
+  const params = [project_id];
+  let i = 2;
+  if (status) { where.push(`status = $${i++}`); params.push(status); }
+  params.push(Math.min(parseInt(req.query.limit) || 200, 500));
   const rows = await db.prepare(
-    'SELECT * FROM material_submittals WHERE project_id = ? ORDER BY id DESC LIMIT 200'
-  ).allAsync(req.query.project_id);
+    `SELECT * FROM material_submittals WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT $${i}`
+  ).allAsync(...params);
   res.json(rows);
 });
 

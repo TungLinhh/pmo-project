@@ -9,6 +9,7 @@
 //   - POST /api/projects                  → create a new project
 //   - POST /api/projects/:id/zones        → create a new zone for a project
 import { getDb } from '../db/index.js';
+import { requireAuth } from '../lib/auth.js';
 import { getFilePath, fileExists } from '../lib/storage.js';
 import { listSheets, detectDocType } from '../lib/excel.js';
 import { findOrCreateProject, findOrCreateZone, INGESTORS } from '../services/ingest/index.js';
@@ -17,7 +18,7 @@ const TENANT_ID = 1;
 
 export function registerWizardRoutes(app) {
   // List all available doc_types
-  app.get('/api/upload/doc-types', (req, res) => {
+  app.get('/api/upload/doc-types', requireAuth, (req, res) => {
     const types = Object.keys(INGESTORS).map(t => ({
       id: t,
       label: t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
@@ -26,7 +27,7 @@ export function registerWizardRoutes(app) {
   });
 
   // Configure an upload: set project/zone/doc_type. Returns parsed preview.
-  app.post('/api/upload/:id/configure', async (req, res) => {
+  app.post('/api/upload/:id/configure', requireAuth, async (req, res) => {
     const db = getDb();
     const uploadId = Number(req.params.id);
     const { project_id, zone_id, doc_type, process_code, new_project, new_zone } = req.body;
@@ -97,7 +98,7 @@ export function registerWizardRoutes(app) {
   });
 
   // Refresh preview (re-parse without changing config)
-  app.post('/api/upload/:id/preview', async (req, res) => {
+  app.post('/api/upload/:id/preview', requireAuth, async (req, res) => {
     const db = getDb();
     const uploadId = Number(req.params.id);
     const upload = await db.prepare('SELECT * FROM file_uploads WHERE id = ?').getAsync(uploadId);
@@ -128,7 +129,7 @@ export function registerWizardRoutes(app) {
   });
 
   // Commit: actually insert parsed data into DB
-  app.post('/api/upload/:id/commit', async (req, res) => {
+  app.post('/api/upload/:id/commit', requireAuth, async (req, res) => {
     const db = getDb();
     const uploadId = Number(req.params.id);
     const upload = await db.prepare('SELECT * FROM file_uploads WHERE id = ?').getAsync(uploadId);
@@ -164,7 +165,7 @@ export function registerWizardRoutes(app) {
   });
 
   // Create a new project
-  app.post('/api/projects', async (req, res) => {
+  app.post('/api/projects', requireAuth, async (req, res) => {
     const db = getDb();
     const { code, name_vi, name_en, package: pkg, rev_prefix } = req.body;
     if (!code) return res.status(400).json({ error: 'code is required' });
@@ -179,7 +180,7 @@ export function registerWizardRoutes(app) {
   });
 
   // Create a new zone for a project
-  app.post('/api/projects/:id/zones', async (req, res) => {
+  app.post('/api/projects/:id/zones', requireAuth, async (req, res) => {
     const db = getDb();
     const projectId = Number(req.params.id);
     const { code, name_vi, name_en } = req.body;

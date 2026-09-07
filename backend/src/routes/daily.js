@@ -100,7 +100,7 @@ router.post('/daily-reports/:id/photos', upload.array('photos', 20), async (req,
         const saved = saveFile(f.buffer, f.originalname, f.mimetype);
         const ins = await client.query(
           `INSERT INTO daily_photos (daily_report_id, file_path, file_name, mime_type, file_size, uploaded_by, uploaded_at) VALUES ($1, $2, $3, $4, $5, $6, now()) RETURNING *`,
-          [req.params.id, saved.path, saved.filename, f.mimetype, f.size, req.user.id]
+          [req.params.id, saved.key, f.originalname, f.mimetype, f.size, req.user.id]
         );
         results.push(ins.rows[0]);
       }

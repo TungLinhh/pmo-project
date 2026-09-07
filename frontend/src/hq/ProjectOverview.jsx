@@ -68,7 +68,7 @@ export default function ProjectOverview() {
         </div>
         <div className="page-header-right">
           <button className="btn btn-secondary" onClick={openSchedule}><ICON.calendar size={13} />Schedule</button>
-          <button className="btn" onClick={doExport}><ICON.download size={13} />Export</button>
+          {exportApi.ENABLED && <button className="btn" onClick={doExport}><ICON.download size={13} />Export</button>}
         </div>
       </div>
 
