@@ -1,35 +1,96 @@
 # PMO MVP — Demo Script (30 phút cho stakeholder)
 
-> **Mục đích**: Demo end-to-end 4-pillar dashboard + L1-L5 shop approval + payment chain cho sếp/PM/CEO.
+> **Mục đích**: Demo end-to-end ingestion-to-extraction-to-visualization pipeline: Excel upload → parse → DB → 4-pillar dashboard → L1-L5 shop approval → payment chain → daily report → OTD KPI → audit log.
 >
-> **Stack chính**: Login → Control Center → Shop Drawing (L1-L5) → Material Submittal (TVGS) → Payment 4-step → Daily Report + Photo → OTD KPI.
+> **Stack chính**: Login → Upload Wizard (ingestion) → Control Center (visualization) → Shop Drawing L1-L5 → Material Submittal TVGS → Payment 4-step → Daily Report + Photo → OTD KPI → Audit Log.
 >
 > **Yêu cầu trước khi demo**:
-> - Backend + Postgres đang chạy (kiểm tra `curl http://localhost:3000/api/health` trả 200)
-> - Browser sẵn sàng tại `http://localhost:5173` (dev) hoặc `http://localhost:3000` (prod)
-> - Mở sẵn tab Postman/curl để call API nếu cần
-> - Chuẩn bị sẵn 1 file Excel mẫu `Tien_Do_Thanh_Toan_HoaBinh.xlsx` để demo upload wizard
+> - Backend + Postgres đang chạy (`curl http://localhost:3000/api/health` trả 200)
+> - Browser sẵn sàng tại `http://localhost:3000` (prod build) hoặc `http://localhost:5173` (dev)
+> - Có 11 file Excel mẫu tại `backend/data/test-fixtures/TEST-MASTER-01/` (Shop TST-A, TĐ TST-B, Vật tư TST-C, ...)
+> - Có 1 file PDF để demo OCR (nếu có)
+>
+> **Thời gian**: 30 phút + 5 phút Q&A
 
----
+
 
 ## Phân bổ thời gian (30 phút)
 
 | Phần | Thời gian | Người trình bày | Người xem chính |
 |------|-----------|------------------|------------------|
-| 1. Giới thiệu + Login | 2 phút | PMO | All |
-| 2. Control Center (4-pillar dashboard) | 5 phút | PMO | CEO, PM |
-| 3. Shop Drawing + L1-L5 Approval | 6 phút | PMO | CEO, PM, BQL |
-| 4. Material Submittal + TVGS | 5 phút | PMO | Procurement |
-| 5. Payment 4-step chain | 5 phút | PMO | CEO, Accounting |
-| 6. Daily Report + Photo Upload | 3 phút | Site lead | PM, CEO |
-| 7. OTD KPI + Audit Log | 3 phút | PMO | CEO |
-| Q&A | 1 phút | All | All |
+| 0. Setup + Ingestion (Excel upload wizard) | 3 phút | PMO | All |
+| 1. Control Center (4-pillar dashboard) | 5 phút | PMO | CEO, PM |
+| 2. Shop Drawing + L1-L5 Approval | 6 phút | PMO | CEO, PM, BQL |
+| 3. Material Submittal + TVGS | 5 phút | PMO | Procurement |
+| 4. Payment 4-step chain | 5 phút | PMO | CEO, Accounting |
+| 5. Daily Report + Photo Upload | 3 phút | Site lead | PM, CEO |
+| 6. OTD KPI + Audit Log | 3 phút | PMO | CEO |
+| Q&A | 5 phút | All | All |
 
----
 
-## Phần 1 — Giới thiệu + Login (2 phút)
 
-**Mục tiêu**: Show 7 demo accounts + role-based redirect.
+## Phần 0 — Setup + Ingestion (Excel Upload Wizard) (3 phút)
+
+**Mục tiêu**: Show ingestion pipeline: upload Excel → parse → detect doc_type → preview → commit → report.
+
+### 0.1. Chuẩn bị
+
+```bash
+# Generate 11 Excel test files (idempotent)
+cd backend
+node scripts/generate-test-excel.mjs
+# → 11 files + manifest.json at data/test-fixtures/TEST-MASTER-01/
+```
+
+**Nói**:
+> "Hệ thống hỗ trợ 11 loại file Excel: Shop Drawing, Construction Schedule, Material Supply, Subcontractors, Suppliers, Daily Report, RFA Log, Business Process, File Start, và 2 file error (zone-not-found, empty)."
+
+### 0.2. Upload 1 file (Shop TST-A.xlsx)
+
+- Sidebar → "Upload" hoặc navigate `/upload`
+- Click "Choose File" → chọn `Shop TST-A.xlsx`
+- Click "Upload"
+- → Returns `{ upload_id, status: "SUCCESS", total_rows: 50, ok_rows: 50, error_rows: 0 }`
+
+**Nói**:
+> "Wizard 5 bước: upload → analyze → map → commit → report. Parse 50 rows × 33 columns tự động, detect doc_type = SHOP, commit vào shop_drawings table."
+
+### 0.3. Upload all 11 files (idempotency demo)
+
+```bash
+# Run full pipeline test
+node scripts/upload-test-pipeline.mjs
+```
+
+**Nói**:
+> "Upload all 11 files. Sau khi upload lần 2, hệ thống detect duplicate → return same upload_id (idempotent). No duplicate rows in DB."
+
+**Điểm kỹ thuật**:
+- `POST /api/upload` multipart → multer stores at `data/uploads/<hash>.xlsx`
+- `POST /api/upload/:id/configure` → detect doc_type via header pattern
+- `POST /api/upload/:id/preview` → parse without DB writes
+- `POST /api/upload/:id/commit` → execute ingestor (parse + commit)
+- `POST /api/upload/:id/report` → `{ inserted, updated, skipped, errors }`
+
+### 0.4. Verify data in DB
+
+```bash
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "
+SELECT status, count(*) FROM shop_drawings GROUP BY status ORDER BY status"
+# → DRAFT: 90
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "
+SELECT count(*) FROM construction_schedule_items"
+# → 416
+```
+
+**Nói**:
+> "Sau khi upload, shop_drawings có 90 DRAFT, construction_schedule_items có 416 rows. Dữ liệu sẵn sàng để demo visualization."
+
+
+
+## Phần 1 — Control Center / 4-pillar Dashboard (5 phút)
+
+**Mục tiêu**: Show visualization: ingestion → DB → pie chart 4 pillars.
 
 ### 1.1. Mở browser
 
@@ -38,105 +99,67 @@ URL: http://localhost:3000
 ```
 
 **Nói**:
-> "Đây là PMO MVP, hệ thống quản lý dự án xây dựng. Tôi sẽ demo 7 quy trình chính trong 25 phút tới."
+> "Đây là PMO MVP. Sau khi ingestion xong, hệ thống tự động visualize 4 pillars: Construction, Shop Drawing, Material, Payment."
 
 ### 1.2. Login với `admin@hbg.com`
 
 - Click chip "Admin" → tự điền email/password
 - Click "Đăng nhập"
 
-**Nói**:
-> "Hệ thống có 7 role: admin, CEO, PM, PMO, site, procurement, accounting. Mỗi role có dashboard khác nhau."
+### 1.3. Sau khi login → redirect `/hq` (Control Center)
 
-**Điểm kỹ thuật** (nếu CEO hỏi):
-- Auth: Bearer token 32-char hex, in-memory Map, logout invalidates ngay
-- 7 demo accounts pre-seeded bởi `npm run init-db`
-
-### 1.3. Sau khi login
-
-- Redirect về `/hq` (Control Center)
-- Sidebar bên trái có 12 menu (Control Center, Issues, Shop List, Materials, Manpower, Payment, OTD, Notifications, Audit, ...)
-
-**Tip trình bày**: Click chuột vào các icon sidebar để show responsive UI, không cần đi sâu vào.
-
----
-
-## Phần 2 — Control Center / 4-pillar Dashboard (5 phút)
-
-**Mục tiêu**: Show cái nhìn tổng quan 1 dự án (BTE-WP4-HBC).
-
-### 2.1. ProjectPicker
-
-- Click dropdown "Project" ở góc trên bên trái
-- Chọn "BTE-WP4-HBC - Khu du lịch sinh thái Bãi Tràm"
+- Sidebar bên trái có 12 menu
+- 4-pillar pie chart ở giữa
 
 **Nói**:
-> "ProjectPicker thay thế select thường — search nhanh theo code hoặc tên Việt/Anh."
+> "4 pillars: Construction (416 items), Shop Drawing (90 DRAFT), Material (75 materials), Payment (271 PENDING). Hover vào slice → tooltip chi tiết."
 
-### 2.2. 4-pillar pie chart
+### 1.4. Period filter
 
-- Nhìn 4 vòng tròn: Construction / Shop Drawing / Material / Payment
-- Mỗi vòng hiển thị status breakdown (e.g. Construction: 24 on-track, 5 late, 3 critical)
-
-**Nói**:
-> "Đây là 4 trụ cột của dự án. Mỗi vòng tròn thể hiện tỷ lệ từng trạng thái. Hover vào slice sẽ thấy chi tiết."
-
-### 2.3. Hover tooltip
-
-- Di chuột qua 1 slice bất kỳ → tooltip hiện ra với số liệu cụ thể
-
-**Điểm kỹ thuật** (nếu hỏi):
-- Custom SVG pie chart (no library, ~50 LOC)
-- Tooltip follow cursor, no overflow
-
-### 2.4. Period filter
-
-- Click dropdown "Period" → chọn "This month" / "Last month" / "Custom"
+- Click dropdown "Period" → chọn "This month"
 - Chart update real-time
 
 **Nói**:
-> "Có thể filter theo tháng/quý/custom date range. Dữ liệu được compute từ 4 APIs song song: schedule, shop, materials, payments."
+> "Dữ liệu được compute từ 4 APIs song song: schedule, shop, materials, payments. Filter theo tháng/quý/custom date range."
 
-**Nếu hỏi chi tiết**: Show tooltip → click vào 1 task bất kỳ → navigate sang Progress Detail.
+### 1.5. Notification bell (góc phải)
 
-### 2.5. Notification bell (góc phải)
-
-- Click icon bell → show dropdown với unread count
-- Click 1 notification → mark as read + navigate tới resource
+- Click icon bell → dropdown với unread count (216 unread)
+- Click 1 notification → mark as read + navigate
 
 **Nói**:
-> "Notification bell cho biết real-time có bao nhiêu việc cần xử lý. Auto-refresh mỗi 30s."
+> "216 unread notifications. Auto-refresh mỗi 30s."
 
----
 
-## Phần 3 — Shop Drawing + L1-L5 Approval (6 phút)
+
+## Phần 2 — Shop Drawing + L1-L5 Approval (6 phút)
 
 **Mục tiêu**: Show workflow duyệt shop drawing đa cấp (L1 → L2 → ... → L5).
 
-### 3.1. Vào Shop List
+### 2.1. Vào Shop List
 
-- Sidebar → "Shop List" (hoặc navigate `/hq/shop`)
+- Sidebar → "Shop List" hoặc navigate `/hq/shop`
 
 **Nói**:
-> "Đây là danh sách shop drawings. Mỗi drawing có 5 levels approval: L1 (concept) → L2 (schematic) → L3 (detailed) → L4 (construction) → L5 (as-built). Mỗi cấp do 1 bộ phận duyệt."
+> "90 shop drawings đang ở status DRAFT. Mỗi drawing có 5 levels approval: L1 (concept) → L2 (schematic) → L3 (detailed) → L4 (construction) → L5 (as-built)."
 
-### 3.2. Filter theo status
+### 2.2. Filter theo status
 
 - Filter: "DRAFT" → thấy drawings chưa submit
 - Filter: "IN_REVIEW" → thấy drawings đang chờ duyệt
 
-### 3.3. Tạo shop drawing mới
+### 2.3. Tạo shop drawing mới
 
 - Click "New Shop Drawing"
 - Điền: project, zone, code, name, planned_submit_date
 - Click "Save as Draft"
 
-### 3.4. Submit
+### 2.4. Submit
 
 - Click drawing vừa tạo
 - Click "Submit for Approval" → status chuyển SUBMITTED
 
-### 3.5. L1-L5 Approve
+### 2.5. L1-L5 Approve
 
 - Click button "Approve L1" → modal hiện ra:
   - Response: chọn **P (Pass)** hoặc **F (Fail)** hoặc **C (Comment only)**
@@ -151,7 +174,7 @@ URL: http://localhost:3000
 - 5 columns `bql_l1_response`..`bql_l5_response` trong schema
 - Endpoint `POST /api/shop-drawings/:id/approve-level` với role check
 
-### 3.6. History (audit trail)
+### 2.6. History (audit trail)
 
 - Click tab "History" → thấy toàn bộ audit log của drawing này
   - Action, user, timestamp, before/after diff, comment
@@ -159,24 +182,24 @@ URL: http://localhost:3000
 **Nói**:
 > "Mỗi thay đổi đều được log vào audit_log — ai làm gì, lúc nào, thay đổi gì. Compliance-ready."
 
----
 
-## Phần 4 — Material Submittal + TVGS (5 phút)
+
+## Phần 3 — Material Submittal + TVGS (5 phút)
 
 **Mục tiêu**: Show workflow submittal + SLA tracking (3-day supervisor deadline).
 
-### 4.1. Vào Materials
+### 3.1. Vào Materials
 
 - Sidebar → "Materials"
 
-### 4.2. Tạo submittal mới
+### 3.2. Tạo submittal mới
 
 - Click "New Submittal"
 - Chọn material từ dropdown
-- Submital code, supplier
+- Submittal code, supplier
 - Click "Create"
 
-### 4.3. Submit for TVGS
+### 3.3. Submit for TVGS
 
 - Click submittal vừa tạo
 - Click "Submit for TVGS"
@@ -191,36 +214,36 @@ URL: http://localhost:3000
 - Cron job mỗi 1h check overdue → notify CEO + PM
 - Endpoint: `POST /api/jobs/escalate-tvgs` (manual trigger)
 
-### 4.4. Approve / Reject
+### 3.4. Approve / Reject
 
 - Click submittal → "Approve" hoặc "Reject"
 - Reject: nhập lý do → status REJECTED → có thể edit + re-submit
 
-### 4.5. Overdue view
+### 3.5. Overdue view
 
 - Navigate `/hq/materials?overdue=1`
 - Hoặc: API `GET /api/projects/:id/material-submittals/overdue`
 
 **Nói**:
-> "Đây là danh sách submittals quá hạn TVGS. Hệ thống sẽ auto-escalate sau 3 ngày."
+> "44 material submittals: 1 DRAFT, 38 SUBMITTED, 4 APPROVED, 1 REJECTED. Hệ thống sẽ auto-escalate sau 3 ngày."
 
----
 
-## Phần 5 — Payment 4-step Chain (5 phút)
 
-**Mục tiêu**: Show chain nghiêm ngặt contracts → invoices → requests → payments.
+## Phần 4 — Payment 4-step Chain (5 phút)
 
-### 5.1. Vào Payment
+**Mục tiêu**: Show chain nghiêm ngặt contracts → invoices → payment_requests → payments.
+
+### 4.1. Vào Payment
 
 - Sidebar → "Payment"
 
-### 5.2. Step 1: Create Contract
+### 4.2. Step 1: Create Contract
 
 - Tab "Contracts" → "New Contract"
 - Vendor, amount, retention_pct (e.g. 10%), start/end date
 - Save → status ACTIVE
 
-### 5.3. Step 2: Create Invoice
+### 4.3. Step 2: Create Invoice
 
 - Từ contract vừa tạo → "Add Invoice"
 - Amount (e.g. 30% contract value), due_date
@@ -229,13 +252,13 @@ URL: http://localhost:3000
 **Nói**:
 > "Invoice phải thuộc 1 contract. Không thể tạo invoice độc lập."
 
-### 5.4. Step 3: Create Payment Request
+### 4.4. Step 3: Create Payment Request
 
 - Từ invoice → "Request Payment"
 - Amount (e.g. 100% invoice, trừ retention 10%), due_date
 - Status: DRAFT → click "Submit for Approval" → SUBMITTED
 
-### 5.5. Step 4: Approve + Pay
+### 4.5. Step 4: Approve + Pay
 
 - Login as accounting (`accounting@hbg.com` / `acc123`)
 - Vào Payment → "Pending Approval"
@@ -244,36 +267,34 @@ URL: http://localhost:3000
 
 **Nói**:
 > "Payment chain nghiêm ngặt 4 bước. Không thể skip bước. Mỗi bước có role gate riêng: accounting cho payment, PM tạo request, CEO duyệt high-value."
+> "271 PENDING, 4 APPROVED, 26 PAID payment requests. 105 contracts, 276 invoices."
 
-**Nếu hỏi "Có thể chỉnh sửa sau khi approve?"**:
-> "Có thể tạo request mới (re-submit) nếu cần sửa. Không thể rollback trực tiếp — compliance-ready."
-
-### 5.6. Audit trail
+### 4.6. Audit trail
 
 - Click tab "History" → thấy toàn bộ chain log
 
----
 
-## Phần 6 — Daily Report + Photo Upload (3 phút)
+
+## Phần 5 — Daily Report + Photo Upload (3 phút)
 
 **Mục tiêu**: Show field workflow (site engineer dùng mobile/tablet).
 
-### 6.1. Login as site
+### 5.1. Login as site
 
 - Logout → login `site@hbg.com` / `site123`
 - Auto-redirect `/field`
 
-### 6.2. Vào Daily Report
+### 5.2. Vào Daily Report
 
 - Click "Daily Report" hoặc navigate `/field/daily-report`
 
-### 6.3. Tạo report
+### 5.3. Tạo report
 
 - Date (default today), weather_am/pm
 - Add manpower: role_code, headcount (e.g. "Worker: 25, Foreman: 2")
 - Click "Save"
 
-### 6.4. Upload photos
+### 5.4. Upload photos
 
 - Click "Upload Photos" → chọn 3-5 ảnh từ máy
 - Photos hiện ra dạng gallery thumbnails
@@ -286,52 +307,137 @@ URL: http://localhost:3000
 - Multipart upload (multer), ≤20 files/request
 - Photos lưu ở `data/uploads/`, metadata ở `daily_photos` table
 
-### 6.5. Manpower rollup
+### 5.5. Manpower rollup
 
 - Navigate `/hq/manpower` (login lại as admin)
 - Filter: tuần này, all projects
-- Show rollup: tổng 247 workers across 4 projects
+- Show rollup: tổng workers across 4 projects
 
 **Nói**:
 > "Hệ thống tự động rollup manpower theo tuần/tháng, cross-project. CEO có thể thấy ngay dự án nào thiếu người."
 
----
 
-## Phần 7 — OTD KPI + Audit Log (3 phút)
+
+## Phần 6 — OTD KPI + Audit Log (3 phút)
 
 **Mục tiêu**: Show KPI tổng hợp + audit trail toàn hệ thống.
 
-### 7.1. OTD Page
+### 6.1. OTD Page
 
 - Sidebar → "OTD" (admin/pm/ceo only)
 - Mặc định project hiện tại, grace_days=0
 
 **Nói**:
 > "OTD = On-Time Delivery. Tỷ lệ tasks hoàn thành đúng hạn. Threshold mặc định là 'bám sát kế hoạch' — actual_end ≤ planned_end."
+> "416 construction schedule items. By Zone breakdown. 6-month trend chart."
 
-### 7.2. By Zone
+### 6.2. By Zone
 
 - Scroll xuống → bảng "By Zone": mỗi zone có OTD%
 - Sort by lowest → thấy zone nào trễ nhất
 
-### 7.3. 6-month trend
+### 6.3. 6-month trend
 
 - Biểu đồ đường: OTD% theo tháng trong 6 tháng gần nhất
-- Click vào tháng → drill down
 
 **Nói**:
 > "OTD < 70% là màu đỏ (critical), 70-90% vàng (watch), ≥90% xanh (good). Hệ thống tự tính toán từ construction_schedule_items."
 
-### 7.4. Audit Log
+### 6.4. Audit Log
 
 - Navigate `/audit` (admin/ceo/pmo only)
 - Filter theo resource_type, user, date range
-- Export CSV
+- Export CSV (620 audit entries)
 
 **Nói**:
 > "Mọi thay đổi đều được log. Tìm kiếm theo user/resource/date. Export CSV cho audit bên ngoài."
+> "620 audit entries, 35 areas, 105 contracts, 75 subcontractors, 30 suppliers."
 
----
+
+
+## Phần 7 — Setup Commands (Chuẩn bị trước demo)
+
+### 7.1. One-time setup (chạy 1 lần)
+
+```bash
+# Clone repo
+git clone https://github.com/TungLinhh/pmo-project.git
+cd pmo-project
+
+# Install all workspaces
+npm install
+
+# Start PostgreSQL (port 5433)
+./backend/scripts/pg-ctl.sh start
+# Data dir: ../data/pgdata/, Port: 5433
+
+# Apply DB schema + seed demo data (idempotent)
+cd backend
+npm run init-db
+# Applies: drizzle/0000_naive_nick_fury.sql + 9998_align + 9999_issues
+# Creates unique indexes, seeds tenant hbg, 7 users, 3 projects, 36 zones
+```
+
+### 7.2. Daily dev / demo prep
+
+```bash
+# Build frontend (prod)
+npm run build
+# Output: frontend/dist/ (served by Express on port 3000)
+
+# Start backend only (port 3000)
+npm start
+
+# Or dev mode (backend + frontend HMR)
+npm run dev
+# Backend: http://localhost:3000
+# Frontend: http://localhost:5173 (HMR)
+```
+
+### 7.3. Generate test Excel files (cho ingestion demo)
+
+```bash
+cd backend
+node scripts/generate-test-excel.mjs
+# → 11 files + manifest.json tại data/test-fixtures/TEST-MASTER-01/
+# Files: Shop TST-A, TĐ TST-B, Vật tư TST-C, Báo cáo TEST, MCR-MM TEST,
+#        quy trình TEST, File start TEST, TĐ XYZ-BAD (error), Shop EMPTY (error)
+```
+
+### 7.4. Seed rich demo data (idempotent)
+
+```bash
+# Enrich TEST-MASTER-01 project (id=3) with realistic demo data
+node scripts/seed-demo-data-enrich.mjs
+# → Distributes 90 shop DRAFT, 44 material submittals, 271 payment requests,
+#   35 issues, 10 notifications, area hierarchy (building→floor→area)
+```
+
+### 7.5. Verify
+
+```bash
+# Health check
+curl http://localhost:3000/api/health
+# → {"status":"ok","timestamp":"...","authenticated":false,"user":null}
+
+# Verify data counts
+PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "
+SELECT 'shops' t, status, count(*) c FROM shop_drawings GROUP BY status
+UNION ALL SELECT 'materials' t, status, count(*) FROM material_submittals GROUP BY status
+UNION ALL SELECT 'payments' t, overall_status, count(*) FROM payment_requests GROUP BY overall_status
+UNION ALL SELECT 'issues' t, severity, count(*) FROM issues GROUP BY severity
+UNION ALL SELECT 'schedule' t, '', count(*) FROM construction_schedule_items
+UNION ALL SELECT 'notifications' t, '', count(*) FROM notifications WHERE read_at IS NULL;"
+```
+
+### 7.6. Tunnel (optional, để share URL)
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+# → https://firm-writings-ids-basename.trycloudflare.com
+```
+
+
 
 ## Q&A — Câu hỏi thường gặp
 
@@ -365,27 +471,17 @@ URL: http://localhost:3000
 
 ### Q8: "Khi nào production-ready?"
 
-> **A**: v0.3.0 hiện tại (Sep 2026) là demo-ready. v1.0 production-ready: 2026-Q4 (sau khi enable password hashing, real email, rate limit).
+> **A**: v0.3.1 hiện tại (Sep 2026) là demo-ready. v1.0 production-ready: 2026-Q4 (sau khi enable password hashing, real email, rate limit).
 
----
+
 
 ## Tips trình bày
 
 ### 1. Trước khi demo (15 phút chuẩn bị)
 
-```bash
-# Verify backend up
-curl http://localhost:3000/api/health
-# → {"status":"ok",...}
-
-# Verify data seeded
-PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo -c "SELECT COUNT(*) FROM projects;"
-# → 2 projects (BTE-WP4-HBC, LAWRENCE-STING-2)
-
-# Verify tunnel up
-curl https://firm-writings-ids-basename.trycloudflare.com/api/health
-# → 200 OK
-```
+- Verify backend up: `curl http://localhost:3000/api/health` → `{"status":"ok",...}`
+- Verify data seeded: run verification SQL above
+- Verify tunnel up: `curl https://firm-writings-ids-basename.trycloudflare.com/api/health`
 
 ### 2. Trong khi demo
 
@@ -403,7 +499,7 @@ curl https://firm-writings-ids-basename.trycloudflare.com/api/health
   - Credentials (nếu stakeholder muốn thử)
   - Timeline v0.4 / v1.0
 
----
+
 
 ## Cấu hình demo cụ thể (tham khảo)
 
@@ -425,26 +521,35 @@ http://localhost:5173     (dev with HMR)
 | Email | Password | Role | Dùng cho phần |
 |-------|----------|------|---------------|
 | `admin@hbg.com` | `admin123` | admin | Mọi thứ |
-| `ceo@hbg.com` | `ceo123` | CEO | Phần 7 (OTD) |
-| `pm@hbg.com` | `pm123` | PM | Phần 3 (Shop) |
-| `site@hbg.com` | `site123` | Site | Phần 6 (Daily Report) |
-| `procurement@hbg.com` | `proc123` | Procurement | Phần 4 (Material) |
-| `accounting@hbg.com` | `acc123` | Accounting | Phần 5 (Payment) |
+| `ceo@hbg.com` | `ceo123` | CEO | Phần 6 (OTD) |
+| `pm@hbg.com` | `pm123` | PM | Phần 2 (Shop) |
+| `site@hbg.com` | `site123` | Site | Phần 5 (Daily Report) |
+| `procurement@hbg.com` | `proc123` | Procurement | Phần 3 (Material) |
+| `accounting@hbg.com` | `acc123` | Accounting | Phần 4 (Payment) |
 
-### File Excel mẫu (sẵn trong `data/test-fixtures/`)
+### File Excel mẫu (sẵn trong `backend/data/test-fixtures/TEST-MASTER-01/`)
 
 ```
-Tien_Do_Thanh_Toan_HoaBinh.xlsx       # payment schedule
-Tien_do_thi_cong_HoaBinh_2024.xlsx    # construction
+Shop TST-A.xlsx            # 50 items × 33 cols (SHOP)
+TĐ TST-B.xlsx              # 100 items × 15 cols (SCHEDULE)
+Vật tư TST-C.xlsx          # 80 items × 10 cols (MATERIAL)
+Báo cáo công việc TEST.xlsx # 84 rows × 27 cols (DAILY)
+MCR-MM TEST.xlsx           # 20 rows × 8 cols (RFA)
+quy trình thực hiện TEST.xlsx # 8 steps × 5 cols (BP)
+File start TEST.xlsx       # 6 files × 4 cols
+TĐ XYZ-BAD.xlsx            # ERROR: zone not found
+Shop EMPTY.xlsx            # ERROR: empty file
+quy trình thực hiện TEST.xlsx
+File start TEST.xlsx
 ```
 
----
+
 
 ## Phụ lục: Những câu hỏi kỹ thuật có thể gặp
 
 ### "Dùng ORM gì?"
 
-> Raw `pg` (PostgreSQL node driver), không ORM. Lý do: schema mature, cần full control SQL (CTE, RETURNING, ON CONFLICT). Drizzle/Prisma thêm indirection không cần thiết.
+> Raw `pg` (PostgreSQL node driver), không ORM. Lý do: schema mature (43 tables), cần full control SQL (CTE, RETURNING, ON CONFLICT). Drizzle/Prisma thêm indirection không cần thiết.
 
 ### "Frontend bundle size?"
 
@@ -456,7 +561,7 @@ Tien_do_thi_cong_HoaBinh_2024.xlsx    # construction
 
 ### "Test coverage?"
 
-> 70 E2E tests (4 suites). Manual UI testing. Unit test coverage ~30% (chưa đo chính thức). Sẽ tăng dần.
+> 70 E2E tests (4 baseline suites). Manual UI testing. Unit test coverage ~30% (chưa đo chính thức). Sẽ tăng dần.
 
 ### "CI/CD?"
 
@@ -474,7 +579,7 @@ Tien_do_thi_cong_HoaBinh_2024.xlsx    # construction
 
 > Schema supports (mọi table có `tenant_id`). UI single-tenant hiện tại. v0.8 sẽ thêm tenant switcher.
 
----
+
 
 ## Kết thúc
 
@@ -483,3 +588,4 @@ Nếu có câu hỏi hoặc cần điều chỉnh, liên hệ engineering team.
 **Live demo**: https://firm-writings-ids-basename.trycloudflare.com
 **Source code**: https://github.com/TungLinhh/pmo-project
 **Docs**: [docs/PRODUCT_TECHNICAL_DOCUMENTATION.md](PRODUCT_TECHNICAL_DOCUMENTATION.md)
+
