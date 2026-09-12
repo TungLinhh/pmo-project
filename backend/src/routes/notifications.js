@@ -1,12 +1,14 @@
 // Notifications routes
 
 import { Router } from 'express';
-import { requireAuth } from '../lib/auth.js';
+import { requireAuth, requireRole } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 import { notify, notifyMany } from '../services/notify.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 router.get('/', async (req, res) => {
   const db = getDb();
@@ -33,11 +35,12 @@ router.post('/mark-all-read', async (req, res) => {
   res.json({ ok: true });
 });
 
-router.post('/', async (req, res) => {
-  // Manual create notification (admin only)
+router.post('/', requireRole('admin', 'ceo'), async (req, res) => {
+  // Manual create notification (admin/CEO only — was unguarded: any user could spam user_ids[])
   const { user_ids, title, body, link, channel, severity, projectId, project_id, issueId, issue_id, resourceType, resource_id } = req.body || {};
   if (!title || !user_ids?.length) return res.status(400).json({ error: 'title and user_ids[] required' });
   await notifyMany(user_ids, {
+    tenantId: req.user.tenant_id,
     title, body, link,
     channels: [channel || 'in_app'],
     severity: severity || 'info',

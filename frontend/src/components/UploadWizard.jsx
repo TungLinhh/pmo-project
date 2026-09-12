@@ -11,11 +11,17 @@ import { toast } from './Toast.jsx';
 
 const STEPS = ['Upload', 'Cấu hình', 'Xem trước', 'Hoàn tất'];
 
-export default function UploadWizard({ open, onClose, onDone, defaultProjectId }) {
+export default function UploadWizard({ open, onClose, onDone, defaultProjectId, startBulk }) {
   const [step, setStep] = useState(0);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadId, setUploadId] = useState(null);
+
+  // Bulk intake: multi-file / folder / zip (each staged individually server-side)
+  const [bulkMode, setBulkMode] = useState(!!startBulk);
+  const [bulkFiles, setBulkFiles] = useState([]); // [{ file, rel, state: 'queued'|'uploading'|'done'|'error', upload_id, error }]
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null); // zip batch summary
 
   // Step 2 state
   const [projects, setProjects] = useState([]);
@@ -58,6 +64,7 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
     if (!open) {
       setTimeout(() => {
         setStep(0); setFile(null); setUploadId(null);
+        setBulkMode(!!startBulk); setBulkFiles([]); setBulkResult(null); setBulkBusy(false);
         setProjectId(defaultProjectId || ''); setZoneId(''); setDocType('');
         setPreview(null); setResult(null);
         setNewProjectOpen(false); setNewZoneOpen(false);
@@ -71,15 +78,22 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
   useEffect(() => {
     if (!file || docType) return;
     const fn = file.name.toLowerCase();
+    // S&P supplier-payment files live among VẬT TƯ names — must win over material_supply.
+    if (/s\s*&\s*p|supplier.*pay|cong no.*ncc|thanh toan.*ncc/i.test(file.name)) {
+      const sp = docTypes.find(d => d.id === 'supplier_payment');
+      if (sp) { setDocType(sp.id); return; }
+    }
     const guess = docTypes.find(d => {
       const id = d.id.toLowerCase();
-      if (id === 'shop_drawing' && (fn.includes('shop') || fn.includes('bql'))) return true;
-      if (id === 'construction_schedule' && (fn.includes('tđ') || fn.includes('td') || fn.includes('schedule'))) return true;
-      if (id === 'material_supply' && (fn.includes('vật tư') || fn.includes('vat tu'))) return true;
-      if (id === 'rfa_log' && (fn.includes('mcr') || fn.includes('rfa'))) return true;
+      if (id === 'shop_drawing' && (fn.includes('shop') || fn.includes('bql') || fn.includes('shd-'))) return true;
+      if (id === 'construction_schedule' && (fn.includes('tđ') || fn.includes('td') || fn.includes('schedule') || fn.includes('csp-'))) return true;
+      if (id === 'material_supply' && (fn.includes('vật tư') || fn.includes('vat tu') || fn.includes('msa'))) return true;
+      if (id === 'rfa_log' && (fn.includes('mcr') || fn.includes('rfa') || fn.includes('duyệt khác') || fn.includes('duyet khac'))) return true;
+      if (id === 'work_breakdown' && fn.includes('cây')) return true;
       if (id === 'daily_report' && (fn.includes('báo cáo') || fn.includes('bao cao') || fn.includes('daily'))) return true;
       if (id === 'business_process' && fn.includes('quy trình')) return true;
       if (id === 'payment_progress' && (fn.includes('thanh toán') || fn.includes('thanh toan'))) return true;
+      if (id === 'payment_ar' && (fn.includes('bãi tràm') || fn.includes('bai tram') || fn.includes('mpm') || fn.includes('hstt') || fn.includes('phải thu') || fn.includes('phai thu') || fn.includes('công nợ'))) return true;
       if (id === 'subcontractor_directory' && fn.includes('thầu phụ')) return true;
       if (id === 'resource_directory' && fn.includes('nguồn lực')) return true;
       return false;
@@ -101,6 +115,62 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
       setUploading(false);
     }
   }, [file]);
+
+  const collectFiles = useCallback((fileList) => {
+    const arr = Array.from(fileList || []).map(f => ({
+      file: f, rel: f.webkitRelativePath || f.name, state: 'queued', upload_id: null, error: null,
+    }));
+    setBulkFiles(arr);
+    setBulkResult(null);
+  }, []);
+
+  const handleBulkUpload = useCallback(async () => {
+    const queued = bulkFiles.filter(f => f.state === 'queued' || f.state === 'error');
+    if (!queued.length) return;
+    setBulkBusy(true);
+    // bounded parallelism: 4 at a time
+    const workers = [];
+    const queue = [...queued];
+    const runOne = async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        setBulkFiles(prev => prev.map(p => p === item ? { ...p, state: 'uploading' } : p));
+        try {
+          const r = await uploads.upload(item.file, null, { relativePath: item.rel });
+          if (r.error || !r.upload_id) throw new Error(r.error || 'No upload_id');
+          setBulkFiles(prev => prev.map(p => p === item ? { ...p, state: 'done', upload_id: r.upload_id } : p));
+        } catch (e) {
+          setBulkFiles(prev => prev.map(p => p === item ? { ...p, state: 'error', error: e.message } : p));
+        }
+      }
+    };
+    for (let i = 0; i < 4; i++) workers.push(runOne());
+    await Promise.all(workers);
+    setBulkBusy(false);
+    const done = bulkFiles.filter(f => f.state === 'done').length;
+    toast.success(`Staged ${done} files — tiếp tục ở review queue`);
+    if (onDone) onDone({ bulk: true });
+  }, [bulkFiles, onDone]);
+
+  const handleZipUpload = useCallback(async (zipFile) => {
+    if (!zipFile) return;
+    setBulkBusy(true);
+    try {
+      const r = await uploads.batchZip(zipFile);
+      if (r.error) throw new Error(r.error);
+      setBulkResult(r);
+      setBulkFiles((r.files || []).map(f => ({
+        file: null, rel: f.relative_path, state: f.status === 'STAGED' ? 'done' : 'error',
+        upload_id: f.upload_id, error: f.skip_reason,
+      })));
+      toast.success(`Batch: ${r.staged} staged, ${r.skipped} skipped`);
+      if (onDone) onDone({ bulk: true, batch: r });
+    } catch (e) {
+      toast.error('Batch lỗi: ' + e.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [onDone]);
 
   const handleCreateProject = useCallback(async () => {
     if (!newProject.code) { toast.error('Nhập project code'); return; }
@@ -187,6 +257,11 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
         <div className="wizard-body">
           {step === 0 && (
             <div className="wizard-step-content">
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <button className={`btn ${!bulkMode ? '' : 'btn-secondary'}`} onClick={() => setBulkMode(false)}>1 file</button>
+                <button className={`btn ${bulkMode ? '' : 'btn-secondary'}`} onClick={() => setBulkMode(true)}>Nhiều file / cả folder / .zip</button>
+              </div>
+              {!bulkMode ? (
               <div
                 className={`wizard-dropzone ${file ? 'has-file' : ''}`}
                 onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
@@ -214,6 +289,51 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
                 )}
                 <input id="wizard-file-input" type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => setFile(e.target.files[0])} />
               </div>
+              ) : (
+              <div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
+                    Chọn nhiều file
+                    <input type="file" multiple accept=".xlsx,.xls,.zip" style={{ display: 'none' }} onChange={e => {
+                      const list = Array.from(e.target.files || []);
+                      const zip = list.find(f => /\.zip$/i.test(f.name));
+                      if (zip && list.length === 1) handleZipUpload(zip);
+                      else collectFiles(list);
+                    }} />
+                  </label>
+                  <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
+                    Chọn cả folder
+                    <input type="file" webkitdirectory="" directory="" style={{ display: 'none' }} onChange={e => collectFiles(e.target.files)} />
+                  </label>
+                  {bulkFiles.length > 0 && (
+                    <button className="btn" onClick={handleBulkUpload} disabled={bulkBusy}>
+                      {bulkBusy ? 'Đang stage...' : `Stage ${bulkFiles.filter(f => f.state === 'queued' || f.state === 'error').length} files`}
+                    </button>
+                  )}
+                </div>
+                {bulkResult && (
+                  <div className="meta" style={{ marginBottom: 8 }}>
+                    Zip batch: {bulkResult.staged} staged, {bulkResult.skipped} skipped / {bulkResult.total} entries
+                  </div>
+                )}
+                {bulkFiles.length > 0 && (
+                  <ul className="field-list" style={{ maxHeight: 220, overflow: 'auto' }}>
+                    {bulkFiles.map((f, i) => (
+                      <li key={i}>
+                        <div>
+                          <div className="label" style={{ fontSize: 11 }}>{f.rel}</div>
+                          <div className="meta">{f.state === 'done' ? `staged #${f.upload_id}` : f.state === 'error' ? (f.error || 'lỗi') : f.state === 'uploading' ? 'đang upload...' : 'chờ stage'}</div>
+                        </div>
+                        <span className="badge" style={{ fontSize: 10 }}>{f.state}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {bulkFiles.length === 0 && !bulkResult && (
+                  <div className="empty">Chọn nhiều .xlsx, cả folder dự án, hoặc 1 file .zip — mỗi file được stage riêng, phân loại ở review queue.</div>
+                )}
+              </div>
+              )}
             </div>
           )}
 
@@ -320,7 +440,8 @@ export default function UploadWizard({ open, onClose, onDone, defaultProjectId }
         <div className="wizard-footer">
           {step > 0 && step < 3 && <button className="btn-secondary" onClick={() => setStep(s => s - 1)}>← Quay lại</button>}
           <div className="wizard-footer-spacer" />
-          {step === 0 && <button className="btn-primary" onClick={handleUpload} disabled={!file || uploading}>{uploading ? 'Uploading...' : 'Upload →'}</button>}
+          {step === 0 && !bulkMode && <button className="btn-primary" onClick={handleUpload} disabled={!file || uploading}>{uploading ? 'Uploading...' : 'Upload →'}</button>}
+          {step === 0 && bulkMode && <button className="btn-primary" onClick={onClose}>Xong — sang review queue</button>}
           {step === 1 && <button className="btn-primary" onClick={handleConfigure} disabled={!projectId || !docType || configuring}>{configuring ? 'Đang parse...' : 'Xem trước →'}</button>}
           {step === 2 && <button className="btn-primary" onClick={handleCommit} disabled={committing}>{committing ? 'Đang insert...' : 'Xác nhận Insert'}</button>}
           {step === 3 && <button className="btn-primary" onClick={onClose}>Đóng</button>}

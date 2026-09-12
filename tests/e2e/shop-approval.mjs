@@ -62,8 +62,7 @@ try {
 }
 
 console.log('\n=== TVGS Escalation ===');
-try {
-  const projectId = 1;
+try {  const projectId = 1;
   const yesterday = new Date(Date.now() - 86400000 * 5).toISOString().slice(0, 10);
 
   const msCreate = await api(T, `/api/material-submittals`, { method: 'POST', body: JSON.stringify({
@@ -93,4 +92,12 @@ try {
 }
 
 console.log(`\n=== Results: ${pass}/${pass + fail} PASS ===`);
+
+// Cleanup: throwaways live on real project 1 — remove by code pattern.
+try {
+  exec(`DELETE FROM notifications WHERE resource_type = 'material_submittal' AND resource_id IN (SELECT id FROM material_submittals WHERE submittal_code LIKE 'TEST-ESC-%');`);
+  exec(`DELETE FROM shop_drawings WHERE drawing_code LIKE 'TEST-L5-%';`);
+  exec(`DELETE FROM material_submittals WHERE submittal_code LIKE 'TEST-ESC-%';`);
+  console.log('cleanup: TEST-L5/TEST-ESC rows + escalation spam removed');
+} catch (e) { console.log('cleanup failed:', e.message.slice(0, 100)); }
 process.exit(fail === 0 ? 0 : 1);

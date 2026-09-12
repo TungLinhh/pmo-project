@@ -1,8 +1,7 @@
-// Payment page (Mục 6.4) - dùng schema mới 43.5
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.5) - Payment transaction model
+// Payment page (Mục 6.4) — contract → invoice → payment_request → payment.
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { projects, getToken } from '../api/index.js';
+import { projects, getToken, preferDemoProject } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import PieChart from '../components/PieChart.jsx';
 import PieTooltip from '../components/PieTooltip.jsx';
@@ -23,6 +22,9 @@ export default function Payment() {
   const [contracts, setContracts] = useState([]);
   const [invoices, setInvoices] = useState({});  // contractId -> [invoices]
   const [paymentRequests, setPaymentRequests] = useState({});  // invoiceId -> [requests]
+  const [arContracts, setArContracts] = useState([]);  // phải thu từ CĐT
+  const [arLines, setArLines] = useState([]);
+  const [arSheet, setArSheet] = useState('');
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -32,7 +34,7 @@ export default function Payment() {
   useEffect(() => {
     projects.list().then(list => {
       setAllProjects(list);
-      if (!selectedProject && list[0]) setSelectedProject(list[0].id);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -55,14 +57,23 @@ export default function Payment() {
         }
         setInvoices(invs);
         setPaymentRequests(prs);
+        // AR (phải thu từ CĐT) — separate tables, never mixed with AP chain
+        const [arcs, lines] = await Promise.all([
+          fetch(`/api/projects/${selectedProject}/ar-contracts`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()).catch(() => []),
+          fetch(`/api/projects/${selectedProject}/ar-lines`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()).catch(() => []),
+        ]);
+        setArContracts(Array.isArray(arcs) ? arcs : []);
+        setArLines(Array.isArray(lines) ? lines : []);
+        setArSheet('');
         setLoading(false);
       });
   }, [selectedProject]);
 
-  // KPI
+  // KPI — amounts arrive as NUMERIC strings from PG; coerce (string + would concatenate).
+  const num = (v) => Number(v) || 0;
   const allRequests = Object.values(paymentRequests).flat();
-  const totalAmount = allRequests.reduce((s, r) => s + (r.amount || 0), 0);
-  const totalRetention = allRequests.reduce((s, r) => s + (r.retention_amount || 0), 0);
+  const totalAmount = allRequests.reduce((s, r) => s + num(r.amount), 0);
+  const totalRetention = allRequests.reduce((s, r) => s + num(r.retention_amount), 0);
   const paid = allRequests.filter(r => r.status === 'APPROVED' || r.status === 'PAID').length;
   const overdue = allRequests.filter(r => r.due_date && new Date(r.due_date) < new Date() && r.status !== 'APPROVED' && r.status !== 'PAID').length;
 
@@ -104,6 +115,10 @@ export default function Payment() {
   }
 
   const totalFmt = (n) => (n / 1e9).toFixed(2);
+  const vnd = (n) => (n == null ? '—' : Number(n).toLocaleString('vi-VN'));
+  const arSheets = Array.from(new Set(arLines.map(l => l.source_sheet))).sort();
+  const arLinesShown = arSheet ? arLines.filter(l => l.source_sheet === arSheet) : arLines.slice(0, 100);
+  const arSum = (k) => arContracts.reduce((s, r) => s + (Number(r[k]) || 0), 0);
   const availableInvoices = Object.entries(invoices).flatMap(([cid, invs]) => invs.filter(inv => String(inv.contract_id) === String(addForm.contract_id)).map(inv => ({ ...inv, contract_id: cid })));
 
   return (
@@ -137,7 +152,7 @@ export default function Payment() {
         <div className="kpi-card critical">
           <div className="label">Overdue</div>
           <div className="value">{overdue}</div>
-          <div className="sub">Đã quá due_date</div>
+          <div className="sub">Đã quá hạn thanh toán</div>
         </div>
         <div className="kpi-card watch" onMouseEnter={() => setHovered('status')} onMouseLeave={() => setHovered(null)} style={{ position: 'relative' }}>
           <div className="label">By status</div>
@@ -152,6 +167,87 @@ export default function Payment() {
         </div>
       </div>
 
+      {/* AR — phải thu từ CĐT (ingest file A_B as payment_ar) */}
+      {!loading && (arContracts.length > 0 || arLines.length > 0) && (
+        <div className="section">
+          <div className="section-title">
+            <span>🧾 Phải thu từ CĐT (AR)</span>
+            <span style={{ fontSize: 12, color: 'var(--c-text-2)' }}>
+              HĐ {totalFmt(arSum('contract_value'))} tỷ · đã TT {totalFmt(arSum('paid_value'))} tỷ · còn lại {totalFmt(arSum('remaining_value'))} tỷ
+            </span>
+          </div>
+          <div className="data-table">
+            <div className="data-table-body">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Dự án</th>
+                    <th>Khách hàng</th>
+                    <th className="num">Giá trị HĐ</th>
+                    <th className="num">Đã TU/TT</th>
+                    <th className="num">Còn lại HĐ</th>
+                    <th className="num">HĐ đã xuất</th>
+                    <th className="num">Đủ ĐK TT ngay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arContracts.map(c => (
+                    <tr key={c.id}>
+                      <td>{c.project_name || '—'}</td>
+                      <td style={{ maxWidth: 280 }}>{c.client_name || '—'}</td>
+                      <td className="num">{vnd(c.contract_value)}</td>
+                      <td className="num">{vnd(c.paid_value)}</td>
+                      <td className="num">{vnd(c.remaining_value)}</td>
+                      <td className="num">{vnd(c.invoiced_value)}</td>
+                      <td className="num">{vnd(c.due_now_value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {arSheets.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label style={{ fontSize: 12 }}>Chi tiết sheet</label>
+              <select value={arSheet} onChange={e => setArSheet(e.target.value)} style={{ padding: 6 }}>
+                <option value="">— tất cả ({arLines.length} dòng, hiện 100) —</option>
+                {arSheets.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
+          {arLinesShown.length > 0 && (
+            <div className="data-table" style={{ marginTop: 8 }}>
+              <div className="data-table-body">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Loại</th>
+                      <th>Hạng mục</th>
+                      <th>Số HĐ/chứng từ</th>
+                      <th>Ngày</th>
+                      <th className="num">Giá trị (VND)</th>
+                      <th>Ghi chú</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {arLinesShown.map(l => (
+                      <tr key={l.id}>
+                        <td><span className="badge" style={{ background: 'var(--c-surface-2)', color: 'var(--c-text-2)' }}>{l.kind}</span></td>
+                        <td style={{ maxWidth: 320 }}>{l.label || '—'}</td>
+                        <td><code>{l.ref_no || '—'}</code></td>
+                        <td>{(l.ref_date || '').slice(0, 10) || '—'}</td>
+                        <td className="num">{vnd(l.amount)}</td>
+                        <td style={{ fontSize: 11 }}>{l.note || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Contracts + Invoices + Payment Requests */}
       {loading ? <div className="empty">Loading...</div> :
        contracts.length === 0 ? <div className="empty">Chưa có contract. <a href="/hq/master-data?r=contracts">Upload Excel Contracts</a>.</div> :
@@ -159,7 +255,7 @@ export default function Payment() {
         <div key={c.id} className="section">
           <div className="section-title">
             <span>📄 {c.contract_no} — {c.contract_name}</span>
-            <span style={{ fontSize: 12, color: 'var(--c-text-2)' }}>{(c.total_value / 1e9).toFixed(2)} tỷ · {c.signed_date || '—'}</span>
+            <span style={{ fontSize: 12, color: 'var(--c-text-2)' }}>{((c.total_value || 0) / 1e9).toFixed(2)} tỷ · {c.signed_date || '—'}</span>
           </div>
           <div className="data-table">
             <div className="data-table-body">
@@ -186,13 +282,13 @@ export default function Payment() {
                           <>
                             <td rowSpan={reqs.length}><code>{inv.invoice_no}</code></td>
                             <td rowSpan={reqs.length}>{inv.invoice_date || '—'}</td>
-                            <td rowSpan={reqs.length} className="num">{(inv.amount || 0).toLocaleString('vi-VN')}</td>
-                            <td rowSpan={reqs.length} className="num">{(inv.vat_amount || 0).toLocaleString('vi-VN')}</td>
+                            <td rowSpan={reqs.length} className="num">{vnd(inv.amount)}</td>
+                            <td rowSpan={reqs.length} className="num">{vnd(inv.vat_amount)}</td>
                           </>
                         )}
                         <td><code>{req.request_no}</code></td>
-                        <td className="num">{(req.amount || 0).toLocaleString('vi-VN')}</td>
-                        <td className="num" style={{ color: 'var(--c-behind)' }}>{(req.retention_amount || 0).toLocaleString('vi-VN')}</td>
+                        <td className="num">{vnd(req.amount)}</td>
+                        <td className="num" style={{ color: 'var(--c-behind)' }}>{vnd(req.retention_amount)}</td>
                         <td>{req.due_date || '—'}</td>
                         <td><span className={`badge workflow-${req.status || 'PENDING'}`}>{req.status || 'PENDING'}</span></td>
                       </tr>
@@ -200,8 +296,8 @@ export default function Payment() {
                       <tr key={inv.id}>
                         <td><code>{inv.invoice_no}</code></td>
                         <td>{inv.invoice_date || '—'}</td>
-                        <td className="num">{(inv.amount || 0).toLocaleString('vi-VN')}</td>
-                        <td className="num">{(inv.vat_amount || 0).toLocaleString('vi-VN')}</td>
+                        <td className="num">{vnd(inv.amount)}</td>
+                        <td className="num">{vnd(inv.vat_amount)}</td>
                         <td colSpan={4} style={{ color: 'var(--c-text-2)', fontSize: 11 }}>Chưa có payment request</td>
                       </tr>
                     );
@@ -215,7 +311,7 @@ export default function Payment() {
       }
 
       <p className="empty" style={{ marginTop: 16, fontSize: 11 }}>
-        TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.5) - retention release workflow, multi-level approver.
+        Chưa có: retention release workflow, multi-level approver.
       </p>
 
       {/* Add milestone modal */}

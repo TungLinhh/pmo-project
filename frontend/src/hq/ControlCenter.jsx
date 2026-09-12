@@ -2,7 +2,7 @@
 // Mục 4-6: Construction / Shop / Material / Payment
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projects as api, construction, shopApi, materialBreakdown as matBreak, exportApi, getToken, uploads } from '../api/index.js';
+import { projects as api, construction, shopApi, materialBreakdown as matBreak, exportApi, getToken, uploads, preferDemoProject } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { HEALTH, HEALTH_COLORS } from '../constants.js';
 import PieChart from '../components/PieChart.jsx';
@@ -62,6 +62,8 @@ export default function ProjectControlCenter() {
   const [paymentData, setPaymentData] = useState([]);   // payment_milestones
   const [matBreakdown, setMatBreakdown] = useState([]); // material category breakdown
   const [loading, setLoading] = useState(true);
+  const [loadedAt, setLoadedAt] = useState(null);
+  const [recentActivity, setRecentActivity] = useState([]);
   const [hoveredPillar, setHoveredPillar] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
@@ -72,7 +74,7 @@ export default function ProjectControlCenter() {
   useEffect(() => {
     api.list().then(list => {
       setAllProjects(list);
-      if (list[0]) setSelectedProject(list[0].id);
+      if (list[0]) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -83,16 +85,21 @@ export default function ProjectControlCenter() {
       construction.schedule(selectedProject),
       shopApi.drawings(selectedProject),
       fetch(`/api/projects/${selectedProject}/payments`, { headers: _authHeaders() }).then(r => r.json()).catch(() => []),
+      fetch(`/api/projects/${selectedProject}/payment-requests`, { headers: _authHeaders() }).then(r => r.json()).catch(() => []),
       fetch(`/api/projects/${selectedProject}/materials`, { headers: _authHeaders() }).then(r => r.json()).catch(() => []),
       matBreak.byProject(selectedProject).catch(() => []),
-    ]).then(([sched, sd, payments, materials, matBreakdown]) => {
+    ]).then(([sched, sd, payments, prs, materials, matBreakdown]) => {
       setSchedule(sched);
       setShopData(sd);
-      setPaymentData(payments);
+      setPaymentData(Array.isArray(prs) && prs.length ? prs : payments);
       setMaterialData(materials);
       setMatBreakdown(matBreakdown);
+      setLoadedAt(new Date());
       setLoading(false);
     });
+    fetch('/api/audit?limit=4', { headers: _authHeaders() }).then(r => r.json()).then(d => {
+      setRecentActivity(Array.isArray(d) ? d : []);
+    }).catch(() => setRecentActivity([]));
   }, [selectedProject]);
 
   // ===== Apply period filter to schedule =====
@@ -151,24 +158,27 @@ export default function ProjectControlCenter() {
     return t ? { Authorization: `Bearer ${t}` } : {};
   }
 
-  // KPI computations
+  // KPI computations — portfolio counts are real; per-project health comes from
+  // the selected project's schedule (no invented baselines).
   const totalProjects = allProjects.length;
-  const onTrack = allProjects.length >= 1 ? 1 : 0;  // demo
-  const watch = 0;
+  const selOverdue = schedule.filter(i => (i.progress_pct || 0) < 1 && i.plan_end_date && new Date(i.plan_end_date) < new Date()).length;
+  const selDone = schedule.length > 0 && schedule.every(i => (i.progress_pct || 0) >= 1);
+  const onTrack = schedule.length > 0 && selOverdue === 0 ? 1 : 0;
+  const watch = schedule.length > 0 && selOverdue === 0 && !selDone ? 0 : 0;
   const critical = totalProjects - onTrack;
 
   // PILLAR 1: Construction Progress
   const completedItems = scheduleForKpi.filter(i => (i.progress_pct || 0) >= 1).length;
   const totalItems = scheduleForKpi.length;
   const actualPct = totalItems > 0 ? Math.round(completedItems / totalItems * 100) : 0;
-  const plannedPct = 78;
-  const delta = actualPct - plannedPct;
-  const progressHealth = delta >= 0 ? HEALTH.ON_TRACK : (delta >= -10 ? HEALTH.WATCH : (delta >= -20 ? HEALTH.BEHIND : HEALTH.CRITICAL));
+  const inProgressItems = totalItems - completedItems;
+  const overdueItems = scheduleForKpi.filter(i => (i.progress_pct || 0) < 1 && i.plan_end_date && new Date(i.plan_end_date) < new Date()).length;
+  // No planned baseline exists in the product (schedule_baselines are manual
+  // snapshots, not auto-planned curves) — health derives from real signals.
+  const progressHealth = overdueItems > 5 ? HEALTH.CRITICAL : overdueItems > 0 ? HEALTH.BEHIND : actualPct >= 90 ? HEALTH.ON_TRACK : actualPct >= 50 ? HEALTH.WATCH : HEALTH.BEHIND;
   const progressColor = HEALTH_COLORS[progressHealth];
 
   const constructionPct = totalItems > 0 ? Math.round(completedItems / totalItems * 100) : 0;
-  const inProgressItems = totalItems - completedItems;
-  const overdueItems = scheduleForKpi.filter(i => (i.progress_pct || 0) < 1 && i.plan_end_date && new Date(i.plan_end_date) < new Date()).length;
 
   const constructionPieData = [
     { label: 'Đã xong', value: completedItems, color: progressColor.fg, breakdown: [
@@ -226,7 +236,6 @@ export default function ProjectControlCenter() {
   ];
 
   // PILLAR 3: Material - load from real materials table
-  // TODO: mục 43.4 - Material Submittal workflow chưa chốt
   const matTotal = materialData.length;
   // Group by material code prefix or name_vi token
   const matByCat = {};
@@ -258,20 +267,16 @@ export default function ProjectControlCenter() {
       { k: 'Số lượng', v: count },
       { k: 'Tỉ lệ', v: matTotal > 0 ? `${Math.round(count / matTotal * 100)}%` : '0%' },
     ],
-  })) : [
-    { label: 'MEP', value: 89, color: '#1e3a5f', breakdown: [{ k: 'Items', v: 89 }] },
-    { label: 'Structural', value: 65, color: '#2563eb', breakdown: [{ k: 'Items', v: 65 }] },
-    { label: 'Architectural', value: 52, color: '#7c3aed', breakdown: [{ k: 'Items', v: 52 }] },
-    { label: 'Finishing', value: 36, color: '#b45309', breakdown: [{ k: 'Items', v: 36 }] },
-  ];
+  })) : [];
 
-  // PILLAR 4: Payment - from real payment_milestones
+  // PILLAR 4: Payment - from payment_requests (falls back to payments ledger rows)
   const payTotal = paymentData.length;
-  const paySubmitted = paymentData.filter(p => p.overall_status === 'SUBMITTED' || p.approval_status === 'PENDING' || p.submitted_date).length;
-  const payApproved = paymentData.filter(p => p.approval_status === 'APPROVED' || p.overall_status === 'APPROVED').length;
-  const payPaid = paymentData.filter(p => p.overall_status === 'PAID' || p.paid_date).length;
+  const st = (p) => String(p.status || '').toUpperCase();
+  const paySubmitted = paymentData.filter(p => ['SUBMITTED', 'PENDING'].includes(st(p)) || p.submitted_date).length;
+  const payApproved = paymentData.filter(p => ['APPROVED'].includes(st(p)) || p.approval_status === 'APPROVED' || p.overall_status === 'APPROVED').length;
+  const payPaid = paymentData.filter(p => ['PAID'].includes(st(p)) || p.overall_status === 'PAID' || p.paid_date || p.paid_at).length;
   const payOverdue = paymentData.filter(p => {
-    if (p.paid_date) return false;
+    if (['PAID'].includes(st(p)) || p.paid_date || p.paid_at) return false;
     if (!p.due_date) return false;
     return new Date(p.due_date) < new Date();
   }).length;
@@ -335,7 +340,7 @@ export default function ProjectControlCenter() {
           </>
         )}
         <div className="right">
-          <span className="shell-freshness"><span className="dot" />Synced 2 phút trước</span>
+          <span className="shell-freshness"><span className="dot" />{loadedAt ? `Tải lúc ${loadedAt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : 'Đang tải…'}</span>
         </div>
       </div>
 
@@ -387,9 +392,9 @@ export default function ProjectControlCenter() {
               </div>
             </div>
             <div className="breakdown">
-              <div className="row"><span className="k">Planned</span><span className="v">{plannedPct}%</span></div>
+              <div className="row"><span className="k">Planned</span><span className="v" style={{ color: 'var(--c-text-2)' }}>— (no baseline)</span></div>
               <div className="row"><span className="k">Actual</span><span className="v">{actualPct}%</span></div>
-              <div className="row"><span className="k">Delta</span><span className="v" style={{ color: delta < 0 ? 'var(--c-behind)' : 'var(--c-on-track)' }}>{delta > 0 ? '+' : ''}{delta}%</span></div>
+              <div className="row"><span className="k">Overdue</span><span className="v" style={{ color: overdueItems > 0 ? 'var(--c-behind)' : 'var(--c-on-track)' }}>{overdueItems}</span></div>
               <div className="row"><span className="k">Zones</span><span className="v">{Object.keys(schedule.reduce((acc, i) => { acc[i.zone_code] = 1; return acc; }, {})).length}</span></div>
             </div>
             <div className="warnings">
@@ -513,30 +518,16 @@ export default function ProjectControlCenter() {
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td style={{ color: 'var(--c-text-2)' }}>2 giờ trước</td>
-                  <td>Shopdrawing overdue</td>
-                  <td><code>4 drawings quá planned submit date</code></td>
-                  <td><span className="badge workflow-OVERDUE">OVERDUE</span></td>
-                </tr>
-                <tr>
-                  <td style={{ color: 'var(--c-text-2)' }}>5 giờ trước</td>
-                  <td>Material delivery delayed</td>
-                  <td>MEP material zone BOH</td>
-                  <td><span className="badge workflow-PENDING">PENDING</span></td>
-                </tr>
-                <tr>
-                  <td style={{ color: 'var(--c-text-2)' }}>1 ngày trước</td>
-                  <td>Daily report submitted</td>
-                  <td>C20 ngày 23.5.2021</td>
-                  <td><span className="badge workflow-SUBMITTED">SUBMITTED</span></td>
-                </tr>
-                <tr>
-                  <td style={{ color: 'var(--c-text-2)' }}>2 ngày trước</td>
-                  <td>Shopdrawing approved</td>
-                  <td><code>BTE-WP4-HBC-SHD-MEP-HVAC-HVA-BOH-015</code></td>
-                  <td><span className="badge workflow-APPROVED">APPROVED</span></td>
-                </tr>
+                {recentActivity.length === 0 ? (
+                  <tr><td colSpan={4} style={{ color: 'var(--c-text-2)' }}>Chưa có hoạt động nào được ghi nhận.</td></tr>
+                ) : recentActivity.map(a => (
+                  <tr key={a.id}>
+                    <td style={{ color: 'var(--c-text-2)' }}>{String(a.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+                    <td>{a.action}{a.resource_type ? ` · ${a.resource_type}` : ''}</td>
+                    <td><code>{(a.note || '').slice(0, 80)}</code></td>
+                    <td><span className="badge workflow-DRAFT">{a.user_name || 'system'}</span></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -548,6 +539,9 @@ export default function ProjectControlCenter() {
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <h3>Upload Excel</h3>
             <p className="meta">Hỗ trợ: Shop Drawing, Construction Schedule, Materials, Subcontractors, Suppliers, Daily Report.</p>
+            <p className="meta">Cần nạp nhiều file, cả folder dự án hoặc file .zip?{' '}
+              <button className="btn-text" onClick={() => { setShowUploadModal(false); nav('/upload'); }}>Mở Bulk Upload →</button>
+            </p>
             <input
               ref={fileInputRef}
               type="file"

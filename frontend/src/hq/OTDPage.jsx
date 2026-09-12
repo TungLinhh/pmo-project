@@ -2,19 +2,24 @@
 // Decision 2026-09-05: OTD threshold = bám sát kế hoạch (actual_end ≤ planned_end + grace_days)
 
 import { useState, useEffect } from 'react';
-import { projects, otd } from '../api/index.js';
+import { useSearchParams } from 'react-router-dom';
+import { projects, otd, preferDemoProject } from '../api/index.js';
 import ProjectPicker from '../components/ProjectPicker.jsx';
 import { ICON } from '../icons.jsx';
 
 export default function OTDPage() {
+  const [params] = useSearchParams();
   const [allProjects, setAllProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState(null);
+  const [selectedProject, setSelectedProject] = useState(params.get('project'));
   const [data, setData] = useState(null);
   const [graceDays, setGraceDays] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    projects.list().then(setAllProjects);
+    projects.list().then(list => {
+      setAllProjects(list);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
+    });
   }, []);
 
   useEffect(() => {

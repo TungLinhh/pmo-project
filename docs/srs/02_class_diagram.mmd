@@ -29,6 +29,22 @@ classDiagram
     +string package
     +string rev_prefix
     +string status
+    +int department_id
+  }
+
+  class Department {
+    +int id
+    +int tenant_id
+    +string code
+    +string name_vi
+  }
+
+  class ApprovalChain {
+    +int id
+    +int tenant_id
+    +int department_id
+    +string resource_type
+    +jsonb levels
   }
 
   class Zone {
@@ -49,6 +65,7 @@ classDiagram
     +string name_en
     +float progress_pct
     +string status
+    +text notes
     +date planned_submit_date
     +date actual_submit_date
     +string bql_l1_response
@@ -57,6 +74,7 @@ classDiagram
     +string bql_l2_response
     +string bql_l3_response
     +string bql_l4_response
+    +string bql_l5_response
     +text rejection_reason
   }
 
@@ -152,11 +170,26 @@ classDiagram
     +string action
     +string resource_type
     +int resource_id
-    +string field_name
-    +string old_value
-    +string new_value
+    +jsonb before
+    +jsonb after
+    +jsonb context
+    +jsonb field_changes
     +text note
     +Date created_at
+  }
+
+  class AuthRefreshToken {
+    +int id
+    +int user_id
+    +string token_hash
+    +Date expires_at
+    +Date revoked_at
+  }
+
+  class SchemaMigration {
+    +string filename
+    +string checksum
+    +Date applied_at
   }
 
   class FileUpload {
@@ -186,6 +219,8 @@ classDiagram
 
   Tenant "1" --> "*" User
   Tenant "1" --> "*" Project
+  Tenant "1" --> "*" Department
+  Tenant "1" --> "*" ApprovalChain
   Tenant "1" --> "*" Zone
   Tenant "1" --> "*" Issue
   Tenant "1" --> "*" Notification
@@ -195,6 +230,9 @@ classDiagram
   Project "1" --> "*" Material
   Project "1" --> "*" Issue
   Project "1" --> "*" KPI
+  Department "1" --> "*" Project
+  Department "1" --> "*" User
+  Department "1" --> "*" ApprovalChain
   Zone "1" --> "*" ShopDrawing
   Zone "1" --> "*" Material
   Material "1" --> "*" MaterialSubmittal

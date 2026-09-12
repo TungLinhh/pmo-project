@@ -1,241 +1,170 @@
-# PMO MVP — Project Management Office
+# PMO — Hệ thống quản lý dự án thi công
 
-> Construction project management system for multi-zone projects (BTE, Lawrence, etc.) with 4-pillar dashboard (Construction / Shop Drawing / Material / Payment), 7 role-based accounts, Excel upload pipeline, L1-L5 shop drawing approval, OTD KPI, photo gallery, payment chain, and PostgreSQL data layer.
-
-**Live demo**: https://firm-writings-ids-basename.trycloudflare.com (login: `admin@hbg.com` / `admin123`)
+> Quản lý tiến độ, shop drawing, vật tư, thanh toán và nhân lực cho các dự án xây dựng nhiều khu vực (zones). Ingest trực tiếp từ file Excel công trường → dashboard 4 trụ cột theo thời gian thực.
 
 ---
 
-## ⚡ Quick Start (5 phút)
+## 1. Cài đặt
 
-### Prerequisites
-- Node.js 20+
-- npm 10+
-- PostgreSQL 16+ (or use the included Docker Compose)
-- Git
+### Yêu cầu
+- Node.js 22+ · npm 10+
+- PostgreSQL 16+ (local) **hoặc** Docker
 
-### Option A — Local with Docker Compose (easiest)
+### Cách 1 — Docker Compose (khuyên dùng)
 
 ```bash
-git clone https://github.com/TungLinhh/pmo-project.git
-cd pmo-project
-docker compose up -d        # spins up postgres + backend
-curl http://localhost:3000/api/health
-# Open http://localhost:3000 in browser
+git clone <repo-url>
+cd pmo_project
+docker compose up --build
+# Mở http://localhost:3000 — Postgres chạy ở 5433, DB tự migrate + seed
 ```
 
-### Option B — Local with native PostgreSQL
+### Cách 2 — Chạy native (dev)
 
 ```bash
-# 1. Start PostgreSQL on port 5433
-# Option: use system pg, homebrew postgres, or run helper:
-#   ./backend/scripts/pg-ctl.sh start
-#   (WSL2 / Linux only)
+# 1. Postgres ở 127.0.0.1:5433 (user/pass/db: pmo_user/pmo_dev_pwd/pmo)
+./backend/scripts/pg-ctl.sh start        # Linux/WSL — hoặc dùng Postgres sẵn có
 
-# 2. Clone & install
-git clone https://github.com/TungLinhh/pmo-project.git
-cd pmo-project
-npm install                 # installs all workspaces (root + backend + frontend)
-
-# 3. Apply DB schema + seed
-cd backend
-npm run init-db             # applies drizzle migrations + seeds demo data
-cd ..
-
-# 4. Start backend (port 3000) + frontend (port 5173 dev, or build for prod)
-npm run dev                 # runs both concurrently
-# Open http://localhost:5173 in browser
+# 2. Cài + migrate + chạy
+npm install
+node backend/src/db/init.js              # migrate (có ledger) + seed demo
+npm run dev                              # backend :3000 + frontend :5173 (HMR)
 ```
 
-### Option C — Production build (single port)
+### Cách 3 — Production một cổng
 
 ```bash
 npm install
-npm run build               # build frontend → frontend/dist/
-npm start                   # backend serves dist/ on port 3000
-# Open http://localhost:3000
+npm run build                            # build frontend → frontend/dist/
+npm start                                # backend phục vụ dist/ ở :3000
 ```
 
----
+### Deploy Coolify / VPS
 
-## 📚 Documentation
-
-Full product specification: **[docs/PRODUCT_TECHNICAL_DOCUMENTATION.md](docs/PRODUCT_TECHNICAL_DOCUMENTATION.md)** — covers:
-- Architecture & data model
-- All 22 backend routers + 3 lib helpers
-- Frontend structure (10 components + 12 HQ screens)
-- 7 demo accounts + permission matrix
-- Deployment, backup, troubleshooting
-- All API endpoints with request/response shapes
-
-UML diagrams: **[docs/srs/](docs/srs/)** — use case, class, sequence, activity, state, ER, deployment (mermaid source + PNG).
-
----
-
-## 🛠 Tech Stack
-
-| Layer | Tech | Notes |
-|-------|------|-------|
-| Backend | Node.js 20 + Express 4 | 22 routers in `backend/src/routes/` |
-| Database | PostgreSQL 16 (raw `pg`) | Drizzle migrations in `backend/drizzle/` |
-| Frontend | Vite + React 19 + React Router 7 | SPA, served as static files by backend in prod |
-| Auth | Bearer token (in-memory) | 7 demo accounts, role-based permissions |
-| File upload | multer (multipart) | Excel parsing via `xlsx` |
-| Container | Docker + Docker Compose | Single command bring-up |
-
----
-
-## 📁 Project Structure
-
-```
-pmo-project/
-├── backend/
-│   ├── src/
-│   │   ├── index.js              # Express composition (130 LOC)
-│   │   ├── lib/                  # auth.js, tx.js, with-audit.js, validation.js
-│   │   ├── routes/               # 22 routers (auth, projects, issues, ...)
-│   │   ├── db/                   # index.js (PG pool), init.js (migrations + seed)
-│   │   └── services/             # ingest/ (Excel parsing) + notify.js
-│   ├── drizzle/                  # SQL migrations
-│   ├── data/                     # PG data + uploads (gitignored)
-│   ├── scripts/                  # pg-ctl.sh
-│   └── package.json
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx               # Router + role-based shell
-│   │   ├── api/                  # API client
-│   │   ├── components/           # BellDropdown, ProjectPicker, DailyReportForm, etc.
-│   │   ├── hq/                   # 12 HQ screens (ControlCenter, OTD, etc.)
-│   │   ├── field/                # 4 Field screens
-│   │   ├── governance/           # Audit log
-│   │   └── styles/               # Design system
-│   └── package.json
-├── tests/
-│   ├── e2e/                      # 5 E2E test scripts (api, payment-sla, shop-approval, schema, browser)
-│   └── tools/                    # schema-audit (SQL vs schema)
-├── docs/                         # PRODUCT_TECHNICAL_DOCUMENTATION.md + srs/
-├── scripts/                      # UI verify scripts (vòng 6/7)
-├── .github/workflows/            # CI (lint + E2E)
-├── Dockerfile                    # Multi-stage build (PG)
-├── docker-compose.yml            # postgres + backend stack
-├── docker-entrypoint.sh          # wait-for-pg + migrate + seed
-├── package.json                  # workspaces + scripts
-├── README.md                     # this file
-└── .gitignore
-```
-
----
-
-## 🔐 Demo Accounts
-
-| Email | Password | Role | Use for |
-|-------|----------|------|---------|
-| `admin@hbg.com` | `admin123` | admin | Full access |
-| `ceo@hbg.com` | `ceo123` | CEO | Portfolio + KPI + approve |
-| `pm@hbg.com` | `pm123` | PM | Manage assigned projects |
-| `pmo@hbg.com` | `pmo123` | PMO | Cross-project monitoring |
-| `site@hbg.com` | `site123` | Site | Field reports, photos |
-| `procurement@hbg.com` | `proc123` | Procurement | Materials, contracts |
-| `accounting@hbg.com` | `acc123` | Accounting | Payment chain |
-
----
-
-## 🧪 Testing
+Image build từ `Dockerfile` (multi-stage, `node:22-slim`). Chỉ cần biến môi trường:
 
 ```bash
-# All 4 E2E suites (70 tests)
-npm test
-
-# Individual suites
-npm run test:api        # 29 tests — full API flow
-npm run test:payment    # 13 tests — payment 4-step chain + submittal SLA
-npm run test:shop       # 13 tests — L1-L5 shop drawing + TVGS escalation
-npm run test:schema     # 15 tests — PG schema integrity
-npm run test:browser    # UI test via Cloudflare tunnel (Playwright)
-
-# Schema vs SQL audit (catches column mismatches)
-npm run audit:schema
+DATABASE_URL=postgresql://user:pass@host:5432/pmo   # hoặc DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME
+JWT_SECRET=chuoi-bi-mat-32-ky-tu-tro-len            # BẮT BUỘC ở production
+UPLOADS_DIR=/app/backend/uploads                    # mount volume bền vững
 ```
 
-**Requirements**: backend must be running on `localhost:3000`. PostgreSQL on port 5433 with `pmo_user` / `pmo_dev_pwd` / `pmo` database.
+Xem mẫu đầy đủ: `.env.example`. Entrypoint tự chờ Postgres → migrate → seed rồi mới boot.
 
 ---
 
-## 🚀 NPM Scripts (root)
+## 2. Đăng nhập demo
 
-| Script | What it does |
-|--------|--------------|
-| `npm run dev` | Start backend + frontend dev (concurrently) |
-| `npm run dev:backend` | Backend only (`node --watch src/index.js`) |
-| `npm run dev:frontend` | Vite dev server (port 5173, HMR) |
-| `npm run build` | Build frontend → `frontend/dist/` |
-| `npm start` | Backend only (serves dist/ in production) |
-| `npm test` | All 4 E2E suites sequentially |
-| `npm run audit:schema` | SQL queries vs schema validator |
-| `npm run lint` | Lint all workspaces |
+Tất cả tài khoản dùng chung mật khẩu dev: **`admin123`**.
+
+| Email | Vai trò |
+|-------|---------|
+| `admin@hbg.com` | Admin — toàn quyền |
+| `ceo@hbg.com` | CEO — xem portfolio, duyệt, đóng dự án |
+| `pm@hbg.com` | PM — quản lý dự án được giao, duyệt shop/vật tư |
+| `pmo@hbg.com` | PMO — giám sát đa dự án, master data, KPI |
+| `site@hbg.com` | Site — báo cáo ngày, ảnh, vật tư, nhân lực (mobile) |
+| `procurement@hbg.com` | Procurement — vật tư, hợp đồng |
+| `accounting@hbg.com` | Accounting — chuỗi thanh toán |
+
+## 3. Các role làm gì (súc tích)
+
+| Role | Được làm |
+|------|----------|
+| **Admin** | Mọi thứ: users, departments, chain duyệt, master data |
+| **CEO** | Duyệt thanh toán/PR, đóng–mở dự án, xem toàn cảnh, nhận escalate |
+| **PM** | Nhập tiến độ, tạo issue/directive, duyệt shop + submittal (dự án mình), nghiệm thu ngày |
+| **PMO** | Xem mọi dự án, KPI targets, master data; không duyệt nghiệp vụ |
+| **Site** | Báo cáo ngày + ảnh, cập nhật % tiến độ được giao, dùng vật tư |
+| **Procurement** | Nhà cung cấp, vật tư, hợp đồng |
+| **Accounting** | Invoice, payment request, thanh toán, công nợ phải thu (AR) |
+
+Phân quyền thực thi ở server (`permissionMiddleware` + membership dự án): sai dự án → 404, sai role → 403. Mọi đổi trạng thái đều qua máy trạng thái tập trung (`lib/transitions.js`) và ghi audit log cùng transaction.
 
 ---
 
-## 🐳 Docker
+## 4. Tính năng
+
+### Pipeline Excel → Dashboard (cốt lõi)
+- **Upload** lẻ hoặc cả folder/zip (≤200MB, chống zip-slip, bỏ qua file khóa `~$`).
+- **Classify** tự nhận 11+ loại tài liệu (tiến độ, shop, vật tư, S&P, HSTT, MPM, MSA, nhật ký…).
+- **Configure → Commit**: preview theo sheet, commit upsert idempotent (chạy lại không trùng).
+- **Drill-down**: click mọi con số trên dashboard → truy về dòng Excel gốc + file nguồn.
+
+### 4 trụ cột (Control Center)
+1. **Thi công** — tiến độ theo zone, OTD, baseline, quá hạn. Trạng thái suy từ `%` + ngày hoàn thành thực tế, không tin chữ trong file.
+2. **Shop drawing** — pipeline DRAFT → SUBMITTED → APPROVED/REJECTED + **chain duyệt linh hoạt theo bộ phận** (VD: L1 Trưởng dự án → L2 Ban TGĐ; tối đa 5 levels, cấu hình ở `/hq/approval-chains`).
+3. **Vật tư** — submittal + SLA 7 ngày, TVGS 3 ngày, tự escalate quá hạn (chống spam theo ngày).
+4. **Thanh toán** — chuỗi hợp đồng → invoice → payment request → chi tiền; giữ lại retention, VAT; công nợ phải thu (AR) từ file HSTT/MPM theo đợt.
+
+### Vận hành công trường (mobile-first, offline-tolerant)
+- Báo cáo ngày: hạng mục, vật tư, nhân lực, nghiệm thu, ảnh (lưu content-addressed).
+- Hàng đợi offline: xem + resolve (giữ server / apply bản offline có kiểm soát allowlist).
+
+### Quản trị & kiểm soát
+- Audit log mọi hành động (ai/lúc nào/trước–sau).
+- Master data: vendors, subcontractors, teams, departments, chains…
+- Migration có ledger + checksum (sai lệch schema → từ chối boot).
+- Test: ~75 suites E2E (`tests/e2e/`), gồm `pipeline-guard` chạy full pipeline trên DB scratch — CI-safe.
+
+---
+
+## 5. Cấu trúc project
+
+```
+pmo_project/
+├── backend/src/
+│   ├── index.js            # Express: 24 routers + static frontend + shutdown an toàn
+│   ├── lib/                # 18 helpers (auth JWT, transitions, approval chains,
+│   │                       #   permissions, txAudit, storage, sync-apply…)
+│   ├── routes/             # 26 files theo domain
+│   ├── services/ingest/    # 12 parsers Excel
+│   └── db/                 # pool PG duy nhất, migrate ledger, seed
+├── backend/drizzle/        # 13 migrations (0000…0003, 9991…9999)
+├── frontend/src/
+│   ├── hq/                 # 13 màn hình HQ (ControlCenter, Payment, Shop…)
+│   ├── field/              # App công trường
+│   ├── governance/         # Approval, Audit, Cấu hình duyệt, Master data
+│   └── api/                # client (tự refresh JWT, FormData upload)
+├── tests/e2e/              # ~75 suites + lib.mjs dùng chung + cleanup-demo.mjs
+├── docs/                   # tài liệu kỹ thuật + SRS (xem dưới)
+├── Dockerfile · docker-compose.yml · docker-entrypoint.sh · .env.example
+```
+
+---
+
+## 6. Kiểm thử
 
 ```bash
-# Build image
-docker build -t pmo-mvp .
-
-# Run with compose (Postgres + backend)
-docker compose up -d
-
-# Or standalone (point to existing PG)
-docker run -d -p 3000:3000 \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=pmo \
-  -e DB_USER=pmo_user \
-  -e DB_PASSWORD=your_pwd \
-  pmo-mvp
+npm test                    # 4 suites CI: api, payment-sla, shop-approval, schema
+node tests/e2e/pipeline-guard.mjs   # full pipeline trên DB scratch (không chạm dev)
+node tests/e2e/demo-walkthrough.mjs # 28 checks luồng demo trên dữ liệu thật
+node tests/e2e/cleanup-demo.mjs     # dọn rác test khỏi DB dev
 ```
 
-Image: `node:20-alpine` (frontend-build stage + runtime stage). Entrypoint waits for PG, applies migrations, seeds.
+Backend dev chạy ở `:3000`, Postgres `127.0.0.1:5433`. Mỗi suite tự dọn rác nó tạo; `cleanup-demo.mjs` dọn phần còn sót.
 
 ---
 
-## 🌐 Environment Variables
+## 7. Biến môi trường
 
-| Var | Default | Notes |
-|-----|---------|-------|
-| `DB_HOST` | `127.0.0.1` | PostgreSQL host |
-| `DB_PORT` | `5433` | `5432` for system PG, `5433` for local cluster |
-| `DB_NAME` | `pmo` | |
-| `DB_USER` | `pmo_user` | |
-| `DB_PASSWORD` | `pmo_dev_pwd` | **dev only** — set real value in prod |
-| `DATABASE_URL` | (built from above) | Optional override |
-| `PORT` | `3000` | Backend HTTP port |
-| `NODE_ENV` | `development` | Set `production` in deploy |
+| Var | Mặc định | Ghi chú |
+|-----|----------|---------|
+| `DATABASE_URL` | (dựng từ DB_*) | Ưu tiên cao nhất |
+| `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` | `127.0.0.1/5433/pmo_user/pmo_dev_pwd/pmo` | Đổi `DB_PASSWORD` ở prod |
+| `JWT_SECRET` | (dev default + warning) | **Bắt buộc** ở production |
+| `ACCESS_TTL_SEC` | `86400` | TTL access token |
+| `UPLOADS_DIR` | `backend/uploads` | Mount volume ở prod |
+| `PG_POOL_MAX` | `10` | Pool Postgres duy nhất |
+| `STORAGE_DRIVER` | `local` | `s3` để dành (chưa có SDK) |
 
----
-
-## 🔧 Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| `EADDRINUSE :::3000` | `lsof -i :3000` → `kill -9 <pid>` |
-| `ECONNREFUSED 127.0.0.1:5433` | PG not running. Start with `docker compose up -d postgres` or `./backend/scripts/pg-ctl.sh start` |
-| `column "xyz" does not exist` | Schema drift. Run `npm run audit:schema` to find bad queries |
-| White screen on dashboard | Check browser console — usually a runtime error. `npm test` to verify backend |
-| `npm install` fails on Windows | Use WSL2 or Docker |
+Gặp sự cố (`EADDRINUSE`, mất kết nối PG, drift schema): xem Troubleshooting trong tài liệu kỹ thuật.
 
 ---
 
-## 📜 License
+## 8. Tài liệu chi tiết
 
-Proprietary — internal use only. © 2026 HBG Construction.
-
----
-
-## 🤝 Contributing
-
-1. Fork + create branch: `git checkout -b feature/your-feature`
-2. Make changes + add tests
-3. `npm test` must pass + `npm run audit:schema` clean
-4. Commit: `git commit -m "Add: your feature"`
-5. Push + open Pull Request
+**[docs/PRODUCT_TECHNICAL_DOCUMENTATION.md](docs/PRODUCT_TECHNICAL_DOCUMENTATION.md)** — đặc tả kỹ thuật đầy đủ, súc tích:
+kiến trúc & vòng đời request, data model (51 bảng), tham chiếu backend (24 routers, 18 libs),
+frontend, auth & phân quyền, 7 workflow nghiệp vụ, triển khai, backup và API.
+Sơ đồ UML (mermaid + PNG): **[docs/srs/](docs/srs/)**.

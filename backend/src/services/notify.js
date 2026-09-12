@@ -79,23 +79,25 @@ async function sendZalo(userZaloId, body) {
 }
 
 // Send notification to a user
-// options: { userId, projectId, issueId, title, body, severity, resourceType, resourceId, channels: ['in_app', 'email', 'zalo'] }
+// options: { userId, tenantId, projectId, issueId, title, body, severity, resourceType, resourceId, channels: ['in_app', 'email', 'zalo'] }
+// tenantId is REQUIRED (no silent cross-tenant writes) — callers pass req.user.tenant_id.
 // Backward-compat aliases: `channel` (singular) → channels, `link` accepted
 // (no link column yet — kept in signature so call sites don't churn when one is added).
 export async function notify(options) {
-  const { userId, projectId, issueId, title, body, resourceType, resourceId } = options;
+  const { userId, tenantId, projectId, issueId, title, body, resourceType, resourceId } = options;
   let { severity = 'info', channels = ['in_app'] } = options;
   if (options.channel && !options.channels) channels = [options.channel];
   severity = String(severity || 'info').toLowerCase();
   if (!userId) return;
+  if (tenantId == null) throw new Error('notify: tenantId required');
   const db = getDb();
   const results = {};
 
   // 1. in_app (always)
   if (channels.includes('in_app')) {
     try {
-      const info = await db.prepare(`INSERT INTO notifications (tenant_id, user_id, project_id, issue_id, channel, delivery_status, severity, title, body, resource_type, resource_id, sent_at) VALUES (1, ?, ?, ?, 'in_app', 'sent', ?, ?, ?, ?, ?, now())`)
-        .runAsync(userId, projectId || null, issueId || null, severity, title, body, resourceType || null, resourceId || null);
+      const info = await db.prepare(`INSERT INTO notifications (tenant_id, user_id, project_id, issue_id, channel, delivery_status, severity, title, body, resource_type, resource_id, sent_at) VALUES (?, ?, ?, ?, 'in_app', 'sent', ?, ?, ?, ?, ?, now())`)
+        .runAsync(tenantId, userId, projectId || null, issueId || null, severity, title, body, resourceType || null, resourceId || null);
       results.in_app = { ok: true, id: info.lastInsertRowid };
     } catch (e) {
       results.in_app = { ok: false, reason: e.message };

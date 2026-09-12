@@ -1,7 +1,7 @@
 // Shopdrawing List (mục 6.2)
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { projects, shop as shopApi, exportApi } from '../api/index.js';
+import { projects, shop as shopApi, exportApi, preferDemoProject } from '../api/index.js';
 import { getToken } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import ProjectPicker from '../components/ProjectPicker.jsx';
@@ -18,7 +18,7 @@ export default function ShopList() {
   useEffect(() => {
     projects.list().then(list => {
       setAllProjects(list);
-      if (!selectedProject && list[0]) setSelectedProject(list[0].id);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -30,7 +30,7 @@ export default function ShopList() {
       .finally(() => setLoading(false));
   }, [selectedProject, search]);
 
-  // TODO: mục 43.3 - state machine chưa chốt
+  // Display state derived from the canonical status + level responses.
   function stateOf(item) {
     if (item.approval_date) return { code: 'APPROVED', label: 'APPROVED' };
     if (item.bql_l1_response === 'R') return { code: 'REVISION', label: 'REVISION' };
@@ -110,8 +110,8 @@ export default function ShopList() {
                      <td><code>{item.drawing_code}</code></td>
                      <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name_vi || '—'}</td>
                      <td><span className={`badge workflow-${s.code}`}>{s.label}</span></td>
-                     <td style={{ fontSize: 12 }}>{item.planned_submit_date || '—'}</td>
-                     <td style={{ fontSize: 12 }}>{item.actual_submit_date || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{(item.planned_submit_date || '').slice(0, 10) || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{(item.actual_submit_date || '').slice(0, 10) || '—'}</td>
                      <td>{isOverdue ? <span className="badge health-OVERDUE">OVERDUE</span> : (item.approval_date || '—')}</td>
                      <td>{item.bql_l1_response || '—'}</td>
                      <td>{item.bql_l2_response || '—'}</td>

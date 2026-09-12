@@ -39,6 +39,8 @@ export default function IssueDetail() {
   const [loading, setLoading] = useState(true);
   const [directiveText, setDirectiveText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [recipients, setRecipients] = useState([]); // {id,name,role}
+  const [notifyIds, setNotifyIds] = useState([]);
   const user = getUser() || { full_name: 'CEO' };
 
   async function load() {
@@ -58,6 +60,17 @@ export default function IssueDetail() {
 
   useEffect(() => { load(); }, [itemId]);
 
+  useEffect(() => {
+    directives.recipients()
+      .then(list => {
+        const arr = Array.isArray(list) ? list : [];
+        setRecipients(arr);
+        // default tick: PM + PMO (server falls back to the same set when empty)
+        setNotifyIds(arr.filter(u => ['pm', 'pmo'].includes(String(u.role || '').toLowerCase())).map(u => u.id));
+      })
+      .catch(() => {});
+  }, []);
+
   async function sendDirective() {
     if (!directiveText.trim() || !issue) return;
     setSubmitting(true);
@@ -66,7 +79,7 @@ export default function IssueDetail() {
         project_id: issue.project_id,
         issue_id: issue.id,
         body: directiveText,
-        notify_to_user_ids: [],
+        notify_to_user_ids: notifyIds,
       });
       setDirectiveText('');
       await load();
@@ -154,6 +167,21 @@ export default function IssueDetail() {
           value={directiveText}
           onChange={e => setDirectiveText(e.target.value)}
         />
+        {recipients.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8, fontSize: 12 }}>
+            <span style={{ color: 'var(--c-text-2)' }}>Gửi tới:</span>
+            {recipients.map(u => (
+              <label key={u.id} style={{ display: 'flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={notifyIds.includes(u.id)}
+                  onChange={e => setNotifyIds(e.target.checked ? [...notifyIds, u.id] : notifyIds.filter(id => id !== u.id))}
+                />
+                {u.name} <span style={{ color: 'var(--c-text-2)' }}>({u.role})</span>
+              </label>
+            ))}
+          </div>
+        )}
         <div className="form-meta">
           <span>
             Đăng với tên <strong>{user.full_name}</strong> ({user.role || 'CEO'}).<br />

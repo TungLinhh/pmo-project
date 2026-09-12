@@ -10,6 +10,7 @@ const RESOURCES = [
   { key: 'suppliers',      label: 'Suppliers',      icon: ICON.database,  fetch: () => masterData.suppliers() },
   { key: 'business-processes', label: 'Business Processes', icon: ICON.bp, fetch: () => masterData.businessProcesses() },
   { key: 'projects',       label: 'Projects',       icon: ICON.folder,    fetch: () => projects.list() },
+  { key: 'departments',    label: 'Departments',    icon: ICON.manpower, fetch: () => masterData.departments() },
   { key: 'kpi-targets',    label: 'KPI Targets (43.10)', icon: ICON.bell, fetch: () => projects.kpiTargets(1) },
 ];
 
@@ -103,8 +104,7 @@ export default function MasterDataList() {
         </div>
       </div>
       <p className="empty" style={{ marginTop: 16, fontSize: 11 }}>
-        TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) - permission matrix đơn giản, MVP cho phép tất cả role xem master data.<br />
-        TODO: tạm thời, chờ sếp tổng xác nhận (mục 38) - Auto IDs (Material ID 12 chars), Legacy code mapping chưa implement.
+        Ghi master data yêu cầu quyền (server kiểm tra theo role).
       </p>
     </div>
   );

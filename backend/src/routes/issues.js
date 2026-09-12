@@ -2,11 +2,15 @@
 
 import { Router } from 'express';
 import { requireAuth, currentUser } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
+import { requireResourceProject, checkProjectAccess } from '../lib/project-access.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
+router.use('/:id', requireResourceProject({ table: 'issues' }));
 
 router.get('/', async (req, res) => {
   const db = getDb();
@@ -32,6 +36,9 @@ router.get('/:id', async (req, res) => {
 export async function createIssue(req, res) {
   const { project_id, title, body, category, severity, source_resource, source_id, zone_id } = req.body || {};
   if (!project_id || !title) return res.status(400).json({ error: 'project_id and title required' });
+  if (!(await checkProjectAccess(req.user, Number(project_id)))) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
   try {
     const result = await withAudit(req, {
       action: 'CREATE', resourceType: 'issue', resourceId: 0,
@@ -41,8 +48,8 @@ export async function createIssue(req, res) {
     }, async (client) => {
       const ins = await client.query(
         `INSERT INTO issues (tenant_id, project_id, title, body, category, severity, status, source_resource, source_id, zone_id, owner_user_id, created_at)
-         VALUES (1, $1, $2, $3, $4, COALESCE($5, 'NORMAL'), 'OPEN', $6, $7, $8, $9, now()) RETURNING *`,
-        [project_id, title, body, category, severity, source_resource, source_id, zone_id, req.user.id]
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'NORMAL'), 'OPEN', $7, $8, $9, $10, now()) RETURNING *`,
+        [req.user.tenant_id, project_id, title, body, category, severity, source_resource, source_id, zone_id, req.user.id]
       );
       const r = ins.rows[0];
       // Update audit with real resource id (CTE for ORDER BY + LIMIT in UPDATE)

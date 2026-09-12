@@ -1,4 +1,4 @@
-// P0-04: sessions expire; no admin fallback for missing/invalid/expired tokens.
+// P0-04: sessions expire (JWT); no admin fallback for missing/invalid/expired tokens.
 // Run: DATABASE_URL=postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5433/pmo node tests/e2e/p0-04-session.mjs
 import { spawn } from 'node:child_process';
 
@@ -27,7 +27,7 @@ async function boot(port, extraEnv) {
     const login = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'admin@hbg.com', password: 'admin123' }) });
     ok(login.status === 200, `demo login works (got ${login.status})`);
     const { token } = await login.json();
-    ok(typeof token === 'string' && token.startsWith('s_'), 'token format ok');
+    ok(typeof token === 'string' && token.split('.').length === 3, 'token is a JWT');
     const good = await fetch(BASE + '/api/projects', { headers: { Authorization: `Bearer ${token}` } });
     ok(good.status === 200, `valid token → 200 (got ${good.status})`);
   } finally { srv.kill('SIGTERM'); await new Promise(r => setTimeout(r, 1000)); }
@@ -35,7 +35,7 @@ async function boot(port, extraEnv) {
 
 // --- Server B: short TTL — token works, then expires to 401
 {
-  const srv = await boot(3104, { SESSION_TTL_MS: '1500' });
+  const srv = await boot(3104, { ACCESS_TTL_SEC: '1' });
   try {
     const BASE = 'http://localhost:3104';
     const login = await fetch(BASE + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'admin@hbg.com', password: 'admin123' }) });

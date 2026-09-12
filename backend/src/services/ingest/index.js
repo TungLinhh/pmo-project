@@ -33,6 +33,8 @@ import { parse as parseResourceDirectory, commit as commitResourceDirectory } fr
 import { parse as parseRFALog, commit as commitRFALog } from './rfa_log.js';
 import { parse as parseGenericTabular, commit as commitGenericTabular } from './generic_tabular.js';
 import { parse as parseProjectLevel, commit as commitProjectLevel } from './project_level.js';
+import { parse as parseSpAp, commit as commitSpAp } from './sp_ap.js';
+import { parse as parsePaymentAr, commit as commitPaymentAr } from './payment_ar.js';
 
 export const INGESTORS = {
   daily_report: {
@@ -45,19 +47,19 @@ export const INGESTORS = {
   },
   shop_drawing: {
     parse: (fp, opts) => parseShopDrawing(fp, opts.projectId, opts.zoneCode),
-    commit: (parsed, opts) => commitShopDrawing(parsed, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitShopDrawing(parsed, opts.projectId, opts.zoneCode, opts.uploadId),
   },
   construction_schedule: {
     parse: (fp, opts) => parseConstructionSchedule(fp, opts.projectId, opts.zoneCode),
-    commit: (parsed, opts) => commitConstructionSchedule(parsed, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitConstructionSchedule(parsed, opts.projectId, opts.zoneCode, opts.uploadId),
   },
   material_supply: {
     parse: (fp, opts) => parseMaterialSupply(fp, opts.projectId, opts.zoneCode),
-    commit: (parsed, opts) => commitMaterialSupply(parsed, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitMaterialSupply(parsed, opts.projectId, opts.zoneCode, opts.uploadId),
   },
   subcontractor_directory: {
     parse: (fp, opts) => parseSubcontractorDirectory(fp, opts.projectId),
-    commit: (parsed, opts) => commitSubcontractorDirectory(parsed, opts.projectId),
+    commit: (parsed, opts) => commitSubcontractorDirectory(parsed, opts.projectId, opts.tenantId),
   },
   resource_directory: {
     parse: (fp, opts) => parseResourceDirectory(fp, opts.tenantId),
@@ -67,6 +69,17 @@ export const INGESTORS = {
     parse: (fp, opts) => parseRFALog(fp, opts.projectId),
     commit: (parsed, opts) => commitRFALog(parsed, opts.projectId),
   },
+  // Supplier-AP: same register grain as material_supply + payment columns.
+  // The ONLY ingestor writing money tables (contracts/invoices/PRs/payments).
+  supplier_payment: {
+    parse: (fp, opts) => parseSpAp(fp, opts.projectId, opts.zoneCode),
+    commit: (parsed, opts) => commitSpAp(parsed, opts.projectId, opts.zoneCode),
+  },
+  // AR (phải thu từ CĐT): writes ONLY ar_contracts/ar_lines, never AP tables.
+  payment_ar: {
+    parse: (fp, opts) => parsePaymentAr(fp, opts.projectId),
+    commit: (parsed, opts) => commitPaymentAr(parsed, opts.projectId, opts.zoneCode, opts.uploadId),
+  },
 };
 
 for (const t of GENERIC_TYPES) {
@@ -75,6 +88,15 @@ for (const t of GENERIC_TYPES) {
     commit: (parsed, opts) => commitGenericTabular(parsed, opts.projectId, { docType: t }),
   };
 }
+
+// Reference-only stub: work-breakdown navigators (SƠ ĐỒ CÂY) carry data in
+// drawing shapes, not cells — nothing to parse. parse() succeeds with zero
+// rows so the file is *classified*, commit() reports a skip (not a failure)
+// so the review queue shows SKIPPED_REFERENCE with a reason.
+INGESTORS.work_breakdown = {
+  parse: async (fp, opts) => ({ zone: null, sheets: [], totalRows: 0, reference_only: true, note: 'Drawing-shapes only, no cell data' }),
+  commit: async (parsed, opts) => ({ ok: 0, errors: 0, skipped: 'reference', items: [], note: 'Reference file, nothing committed' }),
+};
 
 // Backward-compatible: parse + commit in one call
 export async function ingest(filePath, docType, opts) {

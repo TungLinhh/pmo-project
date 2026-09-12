@@ -21,10 +21,16 @@ const T = login.data?.token;
 if (!T) { fail('login', 'no token'); process.exit(1); }
 pass('login', `token=${T.slice(0, 10)}...`);
 
+// Throwaway project — never touch real projects (BTE/LVK).
+const pj = await api(T, '/api/projects', { method: 'POST', body: JSON.stringify({ code: `PAY-SLA-${Date.now()}` }) });
+if (!pj.data?.id) { fail('setup throwaway project', JSON.stringify(pj.data)); process.exit(1); }
+const PID = pj.data.id;
+pass('setup throwaway project', `id=${PID}`);
+
 console.log('\n=== Payment chain 4 step ===');
 
 // Step 1: Create contract
-const c1 = await api(T, '/api/projects/2/contracts', { method: 'POST', body: JSON.stringify({
+const c1 = await api(T, `/api/projects/${PID}/contracts`, { method: 'POST', body: JSON.stringify({
   contract_no: `CNT-TEST-${Date.now()}`,
   contract_name: 'HĐ test E2E',
   signed_date: '2026-09-01',
@@ -92,7 +98,7 @@ console.log('\n=== Material submittal SLA (TVGS 3 days) ===');
 
 // Create a submittal
 const m1 = await api(T, '/api/material-submittals', { method: 'POST', body: JSON.stringify({
-  project_id: 2,
+  project_id: PID,
   submittal_code: `SUB-TEST-${Date.now()}`,
   sla_days: 7,
 }) });
@@ -120,7 +126,7 @@ if (verify.includes('SUBMITTED') && verify.includes(' 3 ')) {
 }
 
 // Pending supervisor endpoint
-const m3 = await api(T, '/api/projects/2/material-submittals/pending-supervisor?within_days=5');
+const m3 = await api(T, `/api/projects/${PID}/material-submittals/pending-supervisor?within_days=5`);
 if (m3.status === 200 && Array.isArray(m3.data)) {
   pass('pending-supervisor endpoint', `${m3.data.length} submittals due in 5 days`);
 } else {
@@ -128,12 +134,28 @@ if (m3.status === 200 && Array.isArray(m3.data)) {
 }
 
 // Overdue endpoint (should include our submittal if we set date in past, or not)
-const m4 = await api(T, '/api/projects/2/material-submittals/overdue');
+const m4 = await api(T, `/api/projects/${PID}/material-submittals/overdue`);
 if (m4.status === 200) {
   pass('overdue endpoint', `${m4.data.length} overdue (SLA or TVGS)`);
 } else {
   fail('overdue endpoint', JSON.stringify(m4.data));
 }
+
+// Cleanup: everything lives under the throwaway project.
+try {
+  const { execSync } = await import('node:child_process');
+  const P = `bash backend/scripts/pg-ctl.sh psql -c`;
+  const CWD = new URL('../..', import.meta.url).pathname;
+  const run = (sql) => execSync(`${P} "${sql}"`, { encoding: 'utf8', cwd: CWD });
+  run(`DELETE FROM payments WHERE payment_request_id IN (SELECT pr.id FROM payment_requests pr JOIN invoices i ON i.id = pr.invoice_id JOIN contracts c ON c.id = i.contract_id WHERE c.project_id = ${PID});`);
+  run(`DELETE FROM payment_requests WHERE invoice_id IN (SELECT i.id FROM invoices i JOIN contracts c ON c.id = i.contract_id WHERE c.project_id = ${PID});`);
+  run(`DELETE FROM invoices WHERE contract_id IN (SELECT id FROM contracts WHERE project_id = ${PID});`);
+  run(`DELETE FROM contracts WHERE project_id = ${PID};`);
+  run(`DELETE FROM material_submittals WHERE project_id = ${PID};`);
+  run(`DELETE FROM project_members WHERE project_id = ${PID};`);
+  run(`DELETE FROM projects WHERE id = ${PID};`);
+  pass('cleanup throwaway project', `id=${PID}`);
+} catch (e) { fail('cleanup throwaway project', e.message.slice(0, 120)); }
 
 const passed = log.filter(l => l.ok).length;
 console.log(`\n=== ${passed}/${log.length} PASS ===\n`);

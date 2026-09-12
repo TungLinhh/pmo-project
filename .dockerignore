@@ -5,7 +5,6 @@
 .gitattributes
 
 # ===== Documentation =====
-# Docs are not needed in the runtime image
 docs/
 
 # ===== Test files =====
@@ -16,7 +15,7 @@ _test_picker.mjs
 playwright.config.*
 playwright-report/
 
-# ===== CI / scripts (dev only) =====
+# ===== CI / scripts (dev only) — keep docker-entrypoint.sh IN build context =====
 **/.github
 **/.circleci
 **/.gitlab-ci.yml
@@ -77,3 +76,11 @@ Thumbs.db
 # ===== Logs =====
 *.log
 logs/
+
+# ===== Runtime scratch (demo zips, /tmp) — never baked =====
+/tmp/
+**/tmp/
+
+# ===== Reference sheets (large PDFs, ingested via UI at runtime) =====
+reference_sheets/
+reference_sheets_extra/

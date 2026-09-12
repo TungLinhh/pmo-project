@@ -27,12 +27,15 @@ ok(built === 'postgresql://pmo_user:pmo_dev_pwd@postgres:5432/pmo', `DB_* compos
 const def = run({ DATABASE_URL: '', DB_USER: '', DB_PASSWORD: '', DB_HOST: '', DB_PORT: '', DB_NAME: '' });
 ok(def === 'postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5433/pmo', `defaults match README (got ${def})`);
 
-// 4. Live check: backend boots with DB_* only and answers /api/health
+// 4. Live check: backend boots with DB_* only and answers /api/health.
+// Kill by EXACT pid ($!) — never pgrep (that murdered the :3000 demo server
+// once by matching the wrong process). Verify the port goes quiet afterwards.
 const live = execSync(
-  `sh -c 'DATABASE_URL= DB_HOST=127.0.0.1 DB_PORT=5433 DB_USER=pmo_user DB_PASSWORD=pmo_dev_pwd DB_NAME=pmo PORT=3101 node backend/src/index.js > /tmp/p0-02-srv.log 2>&1 & echo $!; sleep 4; curl -s http://localhost:3101/api/health; SRV=$(cat /tmp/p0-02-srv.log >/dev/null; pgrep -f "node backend/src/index.js" | head -1); kill $SRV 2>/dev/null; true'`,
-  { encoding: 'utf8', timeout: 30000 }
+  `sh -c 'DATABASE_URL= DB_HOST=127.0.0.1 DB_PORT=5433 DB_USER=pmo_user DB_PASSWORD=pmo_dev_pwd DB_NAME=pmo PORT=3101 node backend/src/index.js > /tmp/p0-02-srv.log 2>&1 & SRV=$!; sleep 4; curl -s http://localhost:3101/api/health; echo; kill $SRV 2>/dev/null; for i in 1 2 3 4 5 6 7 8; do kill -0 $SRV 2>/dev/null || break; sleep 1; done; kill -0 $SRV 2>/dev/null && echo SURVIVOR || echo REAPED'`,
+  { encoding: 'utf8', timeout: 40000 }
 );
 ok(live.includes('"status"') && live.includes('"ok"'), 'backend boots on DB_* only and serves /api/health');
+ok(live.includes('REAPED') && !live.includes('SURVIVOR'), 'test server reaped by exact pid (no orphan, no friendly fire)');
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

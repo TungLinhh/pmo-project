@@ -1,17 +1,20 @@
 // UI-001: Login (HQ + Field) - với 7 demo accounts cho mục 43.2
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { auth, setToken, setUser } from '../api/index.js';
+import { auth, setToken, setRefreshToken, setUser } from '../api/index.js';
 import '../styles/login.css';
 
+// Demo: mọi account dùng chung mật khẩu dev 'admin123' (hash bcrypt phía server).
+// Password riêng từng user chưa từng hoạt động — chip chỉ fill đúng password dùng được.
+const DEV_PASS = 'admin123';
 const DEMO_ACCOUNTS = [
-  { email: 'admin@hbg.com',     pass: 'admin123',  role: 'PMO (Admin)',     desc: 'Toàn quyền' },
-  { email: 'ceo@hbg.com',       pass: 'ceo123',    role: 'CEO',             desc: 'Ra chỉ thị + xem tất cả' },
-  { email: 'pm@hbg.com',        pass: 'pm123',     role: 'PM',              desc: 'Quản lý dự án' },
-  { email: 'pmo@hbg.com',       pass: 'pmo123',    role: 'PMO',             desc: 'Vận hành + governance' },
-  { email: 'site@hbg.com',      pass: 'site123',   role: 'Site',            desc: 'Hiện trường' },
-  { email: 'procurement@hbg.com', pass: 'proc123', role: 'Procurement',     desc: 'Mua vật tư' },
-  { email: 'accounting@hbg.com',  pass: 'acc123',  role: 'Accounting',      desc: 'Thanh toán' },
+  { email: 'admin@hbg.com',     pass: DEV_PASS,  role: 'PMO (Admin)',     desc: 'Toàn quyền' },
+  { email: 'ceo@hbg.com',       pass: DEV_PASS,  role: 'CEO',             desc: 'Ra chỉ thị + xem tất cả' },
+  { email: 'pm@hbg.com',        pass: DEV_PASS,  role: 'PM',              desc: 'Quản lý dự án' },
+  { email: 'pmo@hbg.com',       pass: DEV_PASS,  role: 'PMO',             desc: 'Vận hành + governance' },
+  { email: 'site@hbg.com',      pass: DEV_PASS,  role: 'Site',            desc: 'Hiện trường' },
+  { email: 'procurement@hbg.com', pass: DEV_PASS, role: 'Procurement',     desc: 'Mua vật tư' },
+  { email: 'accounting@hbg.com',  pass: DEV_PASS,  role: 'Accounting',      desc: 'Thanh toán' },
 ];
 
 export default function Login() {
@@ -36,9 +39,9 @@ export default function Login() {
       const r = await auth.login(email, password);
       if (!r || !r.token) throw new Error('Đăng nhập thất bại');
       setToken(r.token);
+      if (r.refresh_token) setRefreshToken(r.refresh_token);
       setUser(r.user);
-      // TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) — route theo role đơn giản
-      // Site → /field, các role khác → /hq (case-insensitive: DB seeds lowercase, constants uppercase)
+      // Site → /field, các role khác → /hq (DB seeds lowercase, constants uppercase)
       const isSiteRole = String(r.user.role || '').toLowerCase() === 'site';
       nav(isField || isSiteRole ? '/field' : '/hq', { replace: true });
     } catch (e) {

@@ -26,6 +26,12 @@ import { mkdirSync } from 'node:fs';
 
 const { Pool } = pg;
 
+// NUMERIC(oid 1700) arrives as string by default ('16615877.00') — string +
+// silently concatenates instead of adding (the 'NaN tỷ' Payment bug class).
+// Parse at the driver so every consumer sees numbers. Values here are VND
+// amounts well below 2^53; SQL-side SUMs stay exact decimal regardless.
+pg.types.setTypeParser(1700, (v) => (v === null ? null : parseFloat(v)));
+
 // DATABASE_URL wins when set; otherwise build from DB_* parts so
 // docker-compose / production envs (DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME)
 // work without extra wiring. Defaults match README local dev.
@@ -44,8 +50,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let _pgPool = null;
 
+// Single pool for the whole backend — db.prepare(), db.exec(), db.upsert()
+// and tx() all share it (previously tx.js held a second pool, doubling
+// connections and breaking the "same pool" assumption).
 function getPool() {
-  if (!_pgPool) _pgPool = new Pool({ connectionString: PG_URL, max: 10 });
+  if (!_pgPool) {
+    _pgPool = new Pool({
+      connectionString: PG_URL,
+      max: Number(process.env.PG_POOL_MAX) || 10,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    });
+    // Unhandled 'error' on an idle client crashes node — log and continue.
+    _pgPool.on('error', (err) => console.error('[pg pool]', err.message));
+  }
   return _pgPool;
 }
 
@@ -59,32 +77,18 @@ function convertSql(sql) {
 
 class PgStatement {
   constructor(sql) {
+    this.sql = convertSql(sql);
     this._isInsert = sql.trim().toUpperCase().startsWith('INSERT');
-    // Auto-append RETURNING id for INSERT so caller can read lastInsertRowid
-    const trimmed = sql.trim().toUpperCase();
-    if (trimmed.startsWith('INSERT') && !/RETURNING/i.test(sql)) {
-      this.sql = convertSql(sql) + ' RETURNING id';
-    } else {
-      this.sql = convertSql(sql);
-    }
+    this._needsReturningId = this._isInsert && !/RETURNING/i.test(sql);
   }
   async runAsync(...args) {
     const c = await getPool().connect();
     try {
-      // PG sequences often drift after bulk import or manual inserts.
-      // Auto-sync the sequence for INSERTs so we never hit "duplicate key" on the PK.
-      if (this._isInsert) {
-        const tableMatch = this.sql.match(/(?:INSERT\s+INTO)\s+"?(\w+)"?/i);
-        if (tableMatch) {
-          const tbl = tableMatch[1];
-          try {
-            await c.query(`SELECT setval('${tbl}_id_seq', GREATEST((SELECT COALESCE(MAX(id), 0) FROM "${tbl}"), 1))`);
-          } catch (e) {
-            // Table may not have id_seq (e.g. composite PK) — ignore
-          }
-        }
-      }
-      const r = await c.query(this.sql, args);
+      let sql = this.sql;
+      // Tables without an `id` column (composite PKs) can't RETURNING id —
+      // probe once per table per process instead of regex/SQL hacks at callsites.
+      if (this._needsReturningId && (await tableHasId(c, sql))) sql += ' RETURNING id';
+      const r = await c.query(sql, args);
       const lastInsertRowid = r.rows[0]?.id !== undefined ? Number(r.rows[0].id) : undefined;
       return { lastInsertRowid, changes: r.rowCount };
     } finally { c.release(); }
@@ -113,6 +117,24 @@ class PgStatement {
   all() { throw new Error('PG requires async: use await allAsync()'); }
 }
 
+// Which tables have an `id` column (for RETURNING id). Probed once per
+// table per process; sequences are resynced at boot (init.js), so inserts
+// stay a single round-trip with no per-INSERT setval magic.
+const _idProbeCache = new Map();
+async function tableHasId(client, sql) {
+  const m = sql.match(/(?:INSERT\s+INTO)\s+"?(\w+)"?/i);
+  if (!m) return false;
+  const tbl = m[1];
+  if (!_idProbeCache.has(tbl)) {
+    const r = await client.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'id' LIMIT 1`,
+      [tbl]
+    );
+    _idProbeCache.set(tbl, r.rowCount > 0);
+  }
+  return _idProbeCache.get(tbl);
+}
+
 class DbWrapper {
   prepare(sql) { return new PgStatement(sql); }
   async exec(sql) { await getPool().query(sql); }
@@ -121,6 +143,7 @@ class DbWrapper {
 
 let _db = null;
 export function getDb() { if (!_db) _db = new DbWrapper(); return _db; }
+export { getPool };
 export async function closeDb() { if (_pgPool) { await _pgPool.end(); _pgPool = null; } }
 
 // =====================================================================

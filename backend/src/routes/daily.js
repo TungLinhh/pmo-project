@@ -4,13 +4,18 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
+import { requireProjectAccess, requireResourceProject } from '../lib/project-access.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
-import { saveFile, getFilePath } from '../lib/storage.js';
+import { saveFile, getFilePath, fileExists } from '../lib/storage.js';
 import { join } from 'node:path';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
+router.use('/projects/:id', requireProjectAccess());
+router.use('/daily-reports/:id', requireResourceProject({ table: 'daily_reports' }));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
 
@@ -116,6 +121,16 @@ router.post('/daily-reports/:id/photos', upload.array('photos', 20), async (req,
 router.get('/daily-reports/:id/photos', async (req, res) => {
   const db = getDb();
   res.json(await db.prepare('SELECT id, file_name, mime_type, file_size, uploaded_at, uploaded_by FROM daily_photos WHERE daily_report_id = ? ORDER BY id').allAsync(req.params.id));
+});
+
+// Download one photo (DailyReportForm thumbs load via authenticated blob fetch).
+router.get('/daily-reports/photos/:photoId/download', async (req, res) => {
+  const db = getDb();
+  const row = await db.prepare('SELECT id, file_path, file_name, mime_type FROM daily_photos WHERE id = ?').getAsync(req.params.photoId);
+  if (!row) return res.status(404).json({ error: 'Photo not found' });
+  const fullPath = getFilePath(row.file_path);
+  if (!fileExists(row.file_path)) return res.status(404).json({ error: 'File missing from disk' });
+  res.download(fullPath, row.file_name || `photo-${row.id}`);
 });
 
 // Cross-project manpower rollup (week / month)

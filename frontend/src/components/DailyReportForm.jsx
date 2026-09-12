@@ -43,7 +43,13 @@ export default function DailyReportForm({ onSaved }) {
   async function loadPhotos() {
     if (!currentReport) return;
     const list = await daily.listPhotos(currentReport.id);
-    setPhotos(list);
+    // thumbnails via authenticated blob fetch (no public /uploads route exists)
+    const withUrls = await Promise.all((Array.isArray(list) ? list : []).map(async (p) => {
+      try { return { ...p, url: await daily.photoBlob(p.id) }; }
+      catch { return { ...p, url: null }; }
+    }));
+    withUrls.forEach(p => { if (p.url) setTimeout(() => URL.revokeObjectURL(p.url), 10 * 60 * 1000); });
+    setPhotos(withUrls);
   }
 
   useEffect(() => {
@@ -114,15 +120,19 @@ export default function DailyReportForm({ onSaved }) {
             {photos.length > 0 && (
               <div className="photo-gallery">
                 {photos.map(p => (
-                  <a
-                    key={p.id}
-                    href={`/uploads/${p.file_name}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="photo-thumb"
-                  >
-                    <img src={`/uploads/${p.file_name}`} alt={p.file_name} loading="lazy" />
-                  </a>
+                  p.url ? (
+                    <a
+                      key={p.id}
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="photo-thumb"
+                    >
+                      <img src={p.url} alt={p.file_name} loading="lazy" />
+                    </a>
+                  ) : (
+                    <div key={p.id} className="photo-thumb" style={{ fontSize: 11 }}>{p.file_name}</div>
+                  )
                 ))}
               </div>
             )}

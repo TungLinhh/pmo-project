@@ -3,11 +3,13 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 // GET list (active by default, ?include_history=1 trả tất cả versions)
 router.get('/', async (req, res) => {

@@ -151,6 +151,10 @@ export function detectDocType(filename) {
   const f = filename.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
   const fNoDiacritics = f.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+  // AR (phải thu) BEFORE generic payment: these files have their own ingestor.
+  // Matches norm() diacritic-stripped style via fNoDiacritics for safety.
+  if (fNoDiacritics.includes('bai tram') || f.includes('mpm') || f.includes('hstt') || f.includes('ipc') || f.includes('phải thu') || f.includes('phai thu') || f.includes('công nợ') || f.includes('cong no')) return 'payment_ar';
+
   // Payment progress FIRST (before generic "tiến độ" match)
   if (f.includes('thanh toán') || f.includes('thanh toan') || f.includes('payment') || f.includes('hstt')) return 'payment_progress';
 
@@ -158,8 +162,16 @@ export function detectDocType(filename) {
   if (f.includes('quy trình thực hiện') || f.includes('quy trinh thuc hien')) return 'business_process';
   if (f.includes('thầu phụ') || f.includes('thau phu') || f.includes('tổ đội') || f.includes('to doi')) return 'subcontractor_directory';
 
+  // Reference shapes BEFORE generic content matches (bulk folder classifier agrees:
+  // SƠ ĐỒ CÂY is work_breakdown even though the name contains "tiến độ").
+  if (f.includes('sơ đồ cây') || fNoDiacritics.includes('so do cay')) return 'work_breakdown';
+
   // Shop / material / construction
   if (f.includes('shop ') || f.startsWith('shop')) return 'shop_drawing';
+  // Doc-code infixes (bulk folder classifier resolves the same types from folders)
+  if (/shd-/i.test(f)) return 'shop_drawing';
+  if (/csp-/i.test(f)) return 'construction_schedule';
+  if (/msa/i.test(f)) return 'material_supply';
   // Material: match "vat tu" in either diacritic or non-diacritic form
   if (f.includes('vật tư') || f.includes('vat tu') || fNoDiacritics.includes('vat tu')) return 'material_supply';
   if (f.includes('tđ ') || f.includes('td ') || f.includes('tiến độ') || f.includes('tiendo') || fNoDiacritics.includes('tien do')) return 'construction_schedule';
@@ -180,6 +192,7 @@ export function detectDocType(filename) {
   if (f.includes('sơ đồ cây') || f.includes('cây')) return 'work_breakdown';
   if (f.includes('file start')) return 'file_index';
   if (f.includes('nguồn lực') || f.includes('nguon luc') || f.includes('tài nguyên')) return 'resource_directory';
-  if (f.includes('duyệt khác') || f.includes('duyet khac')) return 'other_approved';
+  // DUYỆT KHÁC folder classifies bulk as rfa_log — single-file agrees (was other_approved dead-end).
+  if (f.includes('duyệt khác') || f.includes('duyet khac')) return 'rfa_log';
   return 'unknown';
 }

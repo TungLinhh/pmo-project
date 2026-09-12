@@ -1,7 +1,7 @@
 // UI-006: Issues list - table view với filter + click → IssueDetail
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { projects, issues as issuesApi, getToken } from '../api/index.js';
+import { projects, issues as issuesApi, getToken, preferDemoProject } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { toast } from '../components/Toast.jsx';
 import ProjectPicker from '../components/ProjectPicker.jsx';
@@ -38,7 +38,7 @@ export default function Issues() {
   useEffect(() => {
     projects.list().then(list => {
       setAllProjects(list);
-      if (!selectedProject && list[0]) setSelectedProject(list[0].id);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -197,12 +197,13 @@ export default function Issues() {
               <button className="btn btn-secondary" onClick={() => setShowAddModal(false)} disabled={addBusy}>Hủy</button>
               <button className="btn" onClick={async () => {
                 if (!addForm.title) { toast.error('Tiêu đề bắt buộc'); return; }
+                if (!selectedProject) { toast.error('Chọn dự án trước'); return; }
                 setAddBusy(true);
                 try {
                   const r = await fetch(`/api/projects/${selectedProject}/issues`, {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(addForm)
+                    body: JSON.stringify({ ...addForm, project_id: Number(selectedProject) })
                   }).then(r => r.json());
                   if (r.error) throw new Error(r.error);
                   toast.success('Đã tạo issue #' + r.id);

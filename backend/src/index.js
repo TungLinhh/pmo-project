@@ -34,8 +34,12 @@ import dashboardRouter from './routes/dashboard.js';
 import masterDataRouter from './routes/master-data.js';
 import businessProcessRouter from './routes/business-process.js';
 import uploadRouter from './routes/upload.js';
+import batchRouter from './routes/batch.js';
+import classifyRouter from './routes/classify.js';
 import otdRouter from './routes/otd.js';
 import jobsRouter from './routes/jobs.js';
+import approvalChainsRouter from './routes/approval-chains.js';
+import adminRouter from './routes/admin.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -80,8 +84,13 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/master-data', masterDataRouter);
 app.use('/api/business-process', businessProcessRouter);
 app.use('/api/projects/:id/otd', otdRouter);                  // OTD KPI calculation
-app.use('/api/jobs', jobsRouter);                              // background jobs (TVGS escalation)
+app.use('/api/jobs', jobsRouter);                      // background jobs (TVGS escalation)
+app.use('/api/approval-chains', approvalChainsRouter);  // chain config (Wave 2)
+app.use('/api/admin', adminRouter);                     // user list + department assign
 app.use('/api/upload', uploadRouter);
+app.use('/api/upload', batchRouter); // POST /api/upload/batch (zip intake)
+app.use('/api/upload', classifyRouter); // POST /api/upload/classify (+alias GET /review)
+app.use('/api/uploads', classifyRouter); // GET /api/uploads/review (+alias POST /classify)
 app.use('/api/uploads', uploadRouter);                         // GET list
 
 // Wizard (still legacy, separate file)
@@ -104,7 +113,27 @@ const server = app.listen(PORT, () => {
   console.log(`   API: http://localhost:${PORT}/api/health`);
 });
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
-  server.close(() => closeDb().then(() => process.exit(0)));
+// Track sockets so graceful shutdown can destroy lingering keep-alive/half-open
+// connections instead of hanging forever inside server.close().
+const sockets = new Set();
+server.on('connection', (s) => {
+  sockets.add(s);
+  s.on('close', () => sockets.delete(s));
 });
+
+function gracefulShutdown(signal) {
+  console.log(`${signal} received, shutting down...`);
+  const force = setTimeout(() => { console.error('Shutdown timed out, forcing exit'); process.exit(1); }, 10_000);
+  // server.close() waits for open connections (keep-alive, half-open) — give
+  // in-flight requests 2s, then destroy lingering sockets so exit is guaranteed.
+  const destroyLingering = setTimeout(() => {
+    for (const s of sockets) s.destroy();
+  }, 2000);
+  server.close(() => {
+    clearTimeout(destroyLingering);
+    closeDb().then(() => process.exit(0));
+  });
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

@@ -5,7 +5,7 @@ import { getUser, setToken, setUser } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import '../styles/field.css';
 
-// TODO: mục 43.7 - offline conflict resolution chưa chốt
+// Offline queue status bar (resolve: /field/sync — SERVER keeps, CLIENT applies).
 function SyncStatusBar() {
   const [status, setStatus] = useState('SYNCED');
   useEffect(() => {

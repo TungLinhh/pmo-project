@@ -2,7 +2,7 @@
 // MVP scope: show data from subcontractors + suppliers + (future: workers/machinery tables)
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { projects, getToken, masterData } from '../api/index.js';
+import { projects, getToken, masterData, manpower, preferDemoProject } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import { toast } from '../components/Toast.jsx';
 import ProjectPicker from '../components/ProjectPicker.jsx';
@@ -14,12 +14,13 @@ export default function Manpower() {
   const [selectedProject, setSelectedProject] = useState(params.get('project'));
   const [subs, setSubs] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [mpRows, setMpRows] = useState([]); // daily_manpower rollup rows (real)
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     projects.list().then(list => {
       setAllProjects(list);
-      if (!selectedProject && list[0]) setSelectedProject(list[0].id);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -28,38 +29,35 @@ export default function Manpower() {
     Promise.all([
       masterData.subcontractors().catch(() => []),
       masterData.suppliers().catch(() => []),
-    ]).then(([s, sup]) => {
+      manpower.rollup().catch(() => ({ rows: [] })),
+    ]).then(([s, sup, roll]) => {
       setSubs(s);
       setSuppliers(sup);
+      setMpRows(Array.isArray(roll?.rows) ? roll.rows : []);
       setLoading(false);
     });
   }, [selectedProject]);
 
-  // Demo manpower data - in production this would come from daily_reports
-  const workerStats = [
-    { role: 'Quản lý dự án (PM)', today: 3, total: 8, is_internal: false },
-    { role: 'Chỉ huy trưởng / Phó CHT', today: 5, total: 12, is_internal: false },
-    { role: 'Kỹ sư QS', today: 2, total: 6, is_internal: false },
-    { role: 'Giám sát ATLĐ', today: 4, total: 8, is_internal: false },
-    { role: 'Đốc công (Foreman)', today: 8, total: 16, is_internal: false },
-    { role: 'Thợ điện', today: 24, total: 45, is_internal: false },
-    { role: 'Thợ nước', today: 12, total: 28, is_internal: false },
-    { role: 'Thợ hàn', today: 6, total: 14, is_internal: false },
-    { role: 'Công nhân phụ', today: 32, total: 65, is_internal: false },
-  ];
+  // Real worker stats from daily_manpower rollup (selected project).
+  // today = latest period sum per role; total = all-period sum per role.
+  const workerStats = (() => {
+    const rows = mpRows.filter(r => !selectedProject || Number(r.project_id) === Number(selectedProject));
+    if (!rows.length) return [];
+    const latest = rows.map(r => String(r.period).slice(0, 10)).sort().pop();
+    const byRole = {};
+    for (const r of rows) {
+      const k = r.role_name_vi || r.role_code || '—';
+      if (!byRole[k]) byRole[k] = { role: k, today: 0, total: 0, is_internal: false };
+      byRole[k].total += Number(r.total_workers) || 0;
+      if (String(r.period).slice(0, 10) === latest) byRole[k].today += Number(r.total_workers) || 0;
+    }
+    return Object.values(byRole).sort((a, b) => b.today - a.today);
+  })();
   const totalWorkers = workerStats.reduce((s, w) => s + w.today, 0);
   const totalCapacity = workerStats.reduce((s, w) => s + w.total, 0);
 
-  // Demo machinery data
-  const machines = [
-    { name: 'Cẩu tháp Potain MDT 219', qty: 4, status: 'operational', location: 'TST-A' },
-    { name: 'Máy đào Komatsu PC200', qty: 6, status: 'operational', location: 'TST-B' },
-    { name: 'Máy ủi Caterpillar D6', qty: 2, status: 'maintenance', location: '—' },
-    { name: 'Bơm bê tông Putzmeister', qty: 3, status: 'operational', location: 'TST-C' },
-    { name: 'Cần cẩu 50T Liebherr', qty: 2, status: 'operational', location: 'TST-D' },
-    { name: 'Máy trộn bê tông 500L', qty: 8, status: 'operational', location: 'Various' },
-    { name: 'Máy phát điện 250kVA', qty: 4, status: 'operational', location: 'Various' },
-  ];
+  // No machinery source exists in the product — honest empty state, no fake fleet.
+  const machines = [];
   const statusBadge = (s) => {
     const map = { operational: 'workflow-APPROVED', maintenance: 'workflow-REVIEW', broken: 'workflow-REJECTED' };
     return <span className={`badge ${map[s] || 'workflow-PENDING'}`}>{s.toUpperCase()}</span>;
@@ -131,8 +129,10 @@ export default function Manpower() {
                 </tr>
               </thead>
               <tbody>
-                {workerStats.map(w => {
-                  const pct = Math.round(w.today / w.total * 100);
+                 {loading ? <tr><td colSpan={5}>Loading...</td></tr> :
+                 workerStats.length === 0 ? <tr><td colSpan={5}>Chưa có manpower — nhập báo cáo ngày (field) hoặc ingest file daily.</td></tr> :
+                workerStats.map(w => {
+                  const pct = w.total > 0 ? Math.round(w.today / w.total * 100) : 0;
                   return (
                     <tr key={w.role}>
                       <td>{w.role}</td>
@@ -174,7 +174,8 @@ export default function Manpower() {
                 </tr>
               </thead>
               <tbody>
-                {machines.map((m, i) => (
+                {machines.length === 0 ? <tr><td colSpan={4}>Chưa có dữ liệu thiết bị — rail máy móc chưa có nguồn số liệu.</td></tr> :
+                machines.map((m, i) => (
                   <tr key={i}>
                     <td>{m.name}</td>
                     <td className="num">{m.qty}</td>
@@ -247,7 +248,7 @@ export default function Manpower() {
       )}
 
       <p className="empty" style={{ marginTop: 16, fontSize: 11 }}>
-        TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) - tích hợp daily_reports.manpower, workers table riêng.
+        Số liệu từ /manpower/rollup (daily reports).
       </p>
     </div>
   );

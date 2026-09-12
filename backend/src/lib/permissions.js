@@ -1,11 +1,10 @@
-// Permission Matrix - tạm thời, chờ sếp tổng xác nhận (mục 43.2)
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) - permission matrix
-// TODO: tạm thời, chờ sếp tổng xác nhận - role enum riêng (admin/CEO/PM/PMO/Site/Procurement/Accounting)
-//
-// Matrix: 6 role × module × action × scope
+// Permission Matrix — canonical role model (see PERMISSION_MATRIX below).
+// Roles: ADMIN, CEO (is_ceo flag), PM, PMO, SITE, PROCUREMENT, ACCOUNTING.
+// Matrix: role × module × action × scope (all | own | assigned | false).
 // Modules: schedule, shop, material, payment, issue, master_data, kpi, directive, approval, audit, file_upload
 // Actions: read, write, approve
 // Scope: all | own (project mình quản lý) | assigned (nơi được gán)
+import { getDb } from '../db/index.js';
 
 export const PERMISSION_MATRIX = {
   // PM: Toàn bộ module, project mình quản lý
@@ -50,7 +49,7 @@ export const PERMISSION_MATRIX = {
   //       Ghi: Daily progress, Material, Issue, Photo (chỉ nơi được gán)
   //       Duyệt: Không
   SITE: {
-    schedule: { read: 'assigned', write: false },
+    schedule: { read: 'assigned', write: 'assigned' }, // site cập nhật % tiến độ (PATCH item), không sửa bulk
     shop: { read: 'assigned', write: false, approve: false },
     material: { read: 'assigned', write: 'assigned' },
     payment: { read: false, write: false },
@@ -139,22 +138,27 @@ export function getPermissions(role) {
   return PERMISSION_MATRIX[role?.toUpperCase()] || {};
 }
 
-// Check if user can perform action on module in a specific project scope
-// projectId: optional - if null, only check module/action
-export function canAccess(role, module, action, projectId = null, userId = null) {
-  if (FULL_ACCESS_ROLES.includes(role?.toUpperCase())) return true;
-  const perms = PERMISSION_MATRIX[role?.toUpperCase()];
+// Check if user can perform action on module in a specific project scope.
+// Roles 'ADMIN'/'CEO' (resolved by the caller from role + is_ceo) bypass.
+// projectId: optional — null means list-level (scope not checkable, module gate only).
+//   'own'      = project.pm_user_id matches, or member (membership is operational source)
+//   'assigned' = project_members row
+export async function canAccess(role, module, action, projectId = null, userId = null) {
+  const r = role?.toUpperCase();
+  if (FULL_ACCESS_ROLES.includes(r)) return true;
+  const perms = PERMISSION_MATRIX[r];
   if (!perms) return false;
   const mod = perms[module];
   if (!mod) return false;
   const scope = mod[action];
   if (scope === false || scope === undefined) return false;
-  if (scope === 'all' || scope === 'own' || scope === 'assigned') {
-    // For 'own' or 'assigned', need to check project scope
-    if (scope === 'all') return true;
-    if (!projectId) return true;  // No project check needed for list-level
-    // TODO: Need to query DB to check if user owns/is assigned to projectId
-    return true;  // For now allow - detailed check happens in middleware
+  if (scope === 'all') return true;
+  if (!projectId) return true; // list-level: module gate only
+  const db = getDb();
+  if (scope === 'own') {
+    const p = await db.prepare('SELECT pm_user_id FROM projects WHERE id = ?').getAsync(projectId).catch(() => null);
+    if (p && p.pm_user_id != null && Number(p.pm_user_id) === Number(userId)) return true;
   }
-  return false;
+  const m = await db.prepare('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?').getAsync(projectId, userId).catch(() => null);
+  return !!m;
 }

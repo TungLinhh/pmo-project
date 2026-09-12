@@ -71,9 +71,10 @@ export async function parse(filePath, projectId, options = {}) {
   return { docType: options.docType, sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
 }
 
-export async function commit(parsed, projectId) {
+export async function commit(parsed, projectId, opts = {}) {
   const db = getDb();
   const docType = parsed.docType;
+  const uploadId = opts.uploadId ?? null;
   const report = { doc_type: docType, ok: 0, errors: 0, items: [], zone_splits: {} };
 
   for (const sheet of parsed.sheets) {
@@ -82,17 +83,17 @@ export async function commit(parsed, projectId) {
         if (docType === 'shop_drawing') {
           await db.upsert('shop_drawings',
             { conflictCols: ['project_id', 'drawing_code'] },
-            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, drawing_code: row.drawing_code, name_vi: row.name_vi, progress_pct: row.progress_pct }
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, upload_id: uploadId, drawing_code: row.drawing_code, name_vi: row.name_vi, progress_pct: row.progress_pct }
           );
         } else if (docType === 'material_supply') {
           await db.upsert('materials',
             { conflictCols: ['project_id', 'zone_id', 'material_code'] },
-            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, material_code: row.material_code, name_vi: row.name_vi, progress_pct: row.progress_pct, request_date_1: row.request_date_1 }
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, upload_id: uploadId, material_code: row.material_code, name_vi: row.name_vi, progress_pct: row.progress_pct, request_date_1: row.request_date_1 }
           );
         } else {
           await db.upsert('construction_schedule_items',
             { conflictCols: ['project_id', 'zone_id', 'source_sheet', 'ordinal'] },
-            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, ordinal: row.ordinal, name_vi: row.name_vi, progress_pct: row.progress_pct, plan_start_date: row.plan_start_date, plan_end_date: row.plan_end_date }
+            { project_id: projectId, zone_id: sheet.zone_id, source_sheet: sheet.sheet, upload_id: uploadId, ordinal: row.ordinal, name_vi: row.name_vi, progress_pct: row.progress_pct, plan_start_date: row.plan_start_date, plan_end_date: row.plan_end_date }
           );
         }
         report.ok++;
@@ -107,5 +108,5 @@ export async function commit(parsed, projectId) {
 
 export async function ingestProjectLevel(filePath, projectId, options = {}) {
   const parsed = await parse(filePath, projectId, options);
-  return await commit(parsed, projectId);
+  return await commit(parsed, projectId, options);
 }

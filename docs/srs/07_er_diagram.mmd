@@ -1,18 +1,23 @@
 erDiagram
   TENANT ||--o{ USER : "has"
   TENANT ||--o{ PROJECT : "owns"
+  TENANT ||--o{ DEPARTMENT : "organizes"
+  TENANT ||--o{ APPROVAL_CHAIN : "configures"
   TENANT ||--o{ ZONE : "has"
   TENANT ||--o{ NOTIFICATION : "sends"
   TENANT ||--o{ AUDIT_LOG : "records"
   TENANT ||--o{ FILE_UPLOAD : "stores"
+
+  DEPARTMENT ||--o{ PROJECT : "scopes"
+  DEPARTMENT ||--o{ USER : "employs"
+  DEPARTMENT ||--o{ APPROVAL_CHAIN : "overrides"
 
   USER ||--o{ AUDIT_LOG : "performed"
   USER ||--o{ NOTIFICATION : "receives"
   USER ||--o{ DIRECTIVE : "issued"
 
   PROJECT ||--o{ ZONE : "divided_into"
-  PROJECT ||--o{ SHOP_DRAWING : "has"
-  PROJECT ||--o{ MATERIAL : "uses"
+  PROJECT ||--o{ SHOP_DRAWING : "has"  PROJECT ||--o{ MATERIAL : "uses"
   PROJECT ||--o{ CONSTRUCTION_SCHEDULE_ITEM : "tracks"
   PROJECT ||--o{ CONTRACT : "signs"
   PROJECT ||--o{ ISSUE : "encounters"
@@ -56,6 +61,29 @@ erDiagram
     string code UK
     string name_vi
     string package
+    int department_id FK
+  }
+  DEPARTMENT {
+    int id PK
+    int tenant_id FK
+    string code UK
+    string name_vi
+  }
+  APPROVAL_CHAIN {
+    int id PK
+    int tenant_id FK
+    int department_id FK
+    string resource_type
+    jsonb levels
+  }
+  AUTH_REFRESH_TOKEN {
+    int id PK
+    int user_id FK
+    string token_hash
+  }
+  SCHEMA_MIGRATION {
+    string filename PK
+    string checksum
   }
   ZONE {
     int id PK

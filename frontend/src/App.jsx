@@ -12,9 +12,10 @@ import ProgressDetail from './hq/ProgressDetail.jsx';
 import Issues from './hq/Issues.jsx';
 import IssueDetail from './hq/IssueDetail.jsx';
 import NotificationCenter from './hq/NotificationCenter.jsx';
+import ReviewQueue from './hq/ReviewQueue.jsx';
 import ShopList from './hq/ShopList.jsx';
 import Materials from './hq/Materials.jsx';
-import { Manpower } from './hq/Placeholders.jsx';
+import Manpower from './hq/Manpower.jsx';
 import Payment from './hq/Payment.jsx';
 import OTDPage from './hq/OTDPage.jsx';
 import OTDPage_css from './hq/OTDPage.css?inline';
@@ -27,6 +28,7 @@ import { FieldMaterial, FieldManpower, FieldIssue, FieldReview, FieldSync, Proje
 import MasterDataList from './governance/MasterDataList.jsx';
 import MasterDataEdit from './governance/MasterDataEdit.jsx';
 import Approval from './governance/Approval.jsx';
+import ChainConfig from './governance/ChainConfig.jsx';
 import AuditLog from './governance/AuditLog.jsx';
 import { getToken, projects as api } from './api/index.js';
 import UploadWizard from './components/UploadWizard.jsx';
@@ -89,10 +91,12 @@ export default function App() {
           <Route path="payment" element={<Payment />} />
           <Route path="issues" element={<Issues />} />
           <Route path="issues/item" element={<IssueDetail />} />
+          <Route path="uploads" element={<ReviewQueue />} />
           <Route path="notifications" element={<NotificationCenter />} />
           <Route path="master-data" element={<MasterDataList />} />
           <Route path="master-data/edit" element={<MasterDataEdit />} />
           <Route path="approval" element={<Approval />} />
+          <Route path="approval-chains" element={<ChainConfig />} />
           <Route path="audit" element={<AuditLog />} />
           <Route path="otd" element={<OTDPage />} />
         </Route>
@@ -101,7 +105,7 @@ export default function App() {
         <Route path="/field" element={<Protected><FieldShell /></Protected>}>
           <Route index element={<FieldHome />} />
           <Route path="home" element={<FieldHome />} />
-          <Route path="wbs" element={<ProjectWbsSelection />} />
+          <Route path="wbs" element={<Navigate to="../material" replace />} />
           <Route path="daily-progress" element={<DailyProgress />} />
           <Route path="daily-report" element={<DailyReportForm />} />
           <Route path="material" element={<FieldMaterial />} />
@@ -123,7 +127,7 @@ export default function App() {
 function UploadPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--c-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <UploadWizard open={true} onClose={() => window.history.back()} onDone={() => window.location.href = '/hq/projects'} />
+      <UploadWizard open={true} onClose={() => window.history.back()} onDone={(r) => { window.location.href = r?.bulk ? '/hq/uploads' : '/hq/projects'; }} startBulk={true} />
     </div>
   );
 }

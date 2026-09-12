@@ -11,23 +11,23 @@
 // Auto-run every 1 hour
 
 import { Router } from 'express';
-import { requireAuth } from '../lib/auth.js';
+import { requireAuth, requireRole } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 let _lastRun = null;
 let _lastResult = null;
 
-const TENANT_ID = 1;
-
-async function insertNotification(db, userId, title, body, projectId, resourceType, resourceId, severity) {
+async function insertNotification(db, tenantId, userId, title, body, projectId, resourceType, resourceId, severity) {
   // Schema thật: notifications có project_id, resource_type, resource_id (KHÔNG có link, is_read)
   await db.prepare(
     `INSERT INTO notifications (tenant_id, user_id, project_id, channel, delivery_status, severity, title, body, resource_type, resource_id, created_at)
      VALUES ($1, $2, $3, 'in_app', 'pending', $4, $5, $6, $7, $8, now())`
-  ).runAsync(TENANT_ID, userId, projectId || null, severity, title, body, resourceType, resourceId);
+  ).runAsync(tenantId, userId, projectId || null, severity, title, body, resourceType, resourceId);
 }
 
 export async function runTvgsEscalation() {
@@ -35,14 +35,17 @@ export async function runTvgsEscalation() {
   const now = new Date();
   const escalated = [];
 
-  // 1. Tìm submittals quá TVGS deadline, chưa được escalate hôm nay
+  // 1. Tìm submittals quá TVGS deadline, chưa được escalate hôm nay.
+  // NULL deadlines excluded in SQL (new Date(null) = 1970 → bogus huge daysLate + CEO spam).
   const overdue = await db.prepare(`
     SELECT ms.*, p.code AS project_code, p.name_vi AS project_name,
+           p.tenant_id AS project_tenant_id,
            p.pm_user_id, u.email AS pm_email, u.name AS pm_name
     FROM material_submittals ms
     JOIN projects p ON p.id = ms.project_id
     LEFT JOIN users u ON u.id = p.pm_user_id
     WHERE ms.status = 'SUBMITTED'
+      AND ms.supervisor_deadline IS NOT NULL
       AND ms.supervisor_deadline < CURRENT_DATE
       AND (ms.escalated_at IS NULL OR ms.escalated_at < CURRENT_DATE)
   `).allAsync();
@@ -54,6 +57,7 @@ export async function runTvgsEscalation() {
       if (sub.pm_user_id) {
         await insertNotification(
           db,
+          sub.project_tenant_id,
           sub.pm_user_id,
           `[ESCALATE] TVGS quá hạn ${daysLate} ngày`,
           `Submittal ${sub.submittal_code} (dự án ${sub.project_code}) chờ TVGS duyệt quá ${daysLate} ngày. Cần follow-up ngay.`,
@@ -68,6 +72,7 @@ export async function runTvgsEscalation() {
         for (const admin of admins) {
           await insertNotification(
             db,
+            sub.project_tenant_id,
             admin.id,
             `[ESCALATE] TVGS quá hạn ${daysLate} ngày — dự án chưa có PM`,
             `Submittal ${sub.submittal_code} (${sub.project_code}) — dự án chưa gán PM. Vui lòng gán PM.`,
@@ -84,6 +89,7 @@ export async function runTvgsEscalation() {
       for (const ceo of ceos) {
         await insertNotification(
           db,
+          sub.project_tenant_id,
           ceo.id,
           `[CEO] Submittal quá hạn TVGS`,
           `${sub.submittal_code} (${sub.project_code}) quá ${daysLate} ngày TVGS. PM: ${sub.pm_name || '—'}`,
@@ -115,7 +121,7 @@ export async function runTvgsEscalation() {
   return _lastResult;
 }
 
-router.post('/escalate-tvgs', async (req, res) => {
+router.post('/escalate-tvgs', requireRole('admin', 'ceo'), async (req, res) => {
   const result = await runTvgsEscalation();
   res.json(result);
 });

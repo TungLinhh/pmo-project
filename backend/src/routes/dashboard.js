@@ -2,10 +2,12 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 // GET /api/dashboard — tổng hợp nhanh (portrait toàn tenant)
 router.get('/', async (req, res) => {
@@ -37,7 +39,7 @@ router.get('/', async (req, res) => {
 
 router.get('/portfolio-kpi', async (req, res) => {
   const db = getDb();
-  const projs = await db.prepare("SELECT * FROM projects WHERE tenant_id = 1 AND status = 'ACTIVE' ORDER BY id").allAsync();
+  const projs = await db.prepare("SELECT * FROM projects WHERE tenant_id = ? AND status = 'ACTIVE' ORDER BY id").allAsync(req.user.tenant_id);
   const out = [];
   for (const p of projs) {
     const [kpiOnTime, kpiTotal, materialsTotal, materialsPending, materialsOverdue, submittalsTotal, submittalsPending, sdTotal, sdApproved, manpowerToday, issuesOpen, issuesHigh] = await Promise.all([

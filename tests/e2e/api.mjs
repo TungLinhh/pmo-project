@@ -44,17 +44,17 @@ const afterClose = await api(T, '/api/projects');
 log('after close: p1 hidden', !afterClose.data?.some(p => p.id === 1), `visible=${afterClose.data?.map(p => p.id).join(',')}`);
 
 // 7. Create issue
-const issue = await api(T, '/api/projects/2/issues', { method: 'POST', body: JSON.stringify({ project_id: 2, title: 'E2E test issue', severity: 'HIGH' }) });
+const issue = await api(T, '/api/projects/1/issues', { method: 'POST', body: JSON.stringify({ project_id: 1, title: 'E2E test issue', severity: 'HIGH' }) });
 log('create issue', issue.status === 200 || issue.status === 201, `id=${issue.data?.id}`);
 const issueId = issue.data?.id;
 
 // 8. List issues
-const issues = await api(T, '/api/issues?project_id=2');
+const issues = await api(T, '/api/issues?project_id=1');
 log('list issues', issues.status === 200, `count=${issues.data?.length}`);
 
 // 9. Audit log (filter by project)
-const audit = await api(T, '/api/audit?project_id=2&limit=10');
-log('audit log filter project_id=2', audit.status === 200, `count=${audit.data?.length}`);
+const audit = await api(T, '/api/audit?project_id=1&limit=10');
+log('audit log filter project_id=1', audit.status === 200, `count=${audit.data?.length}`);
 
 // 10. Audit log export CSV
 const csv = await fetch(`${BASE}/api/audit/export?format=csv&limit=5`, { headers: { Authorization: `Bearer ${T}` } });
@@ -91,15 +91,15 @@ const kpiUpd = await api(T, `/api/kpi-targets/${kpiNew.data?.id}`, { method: 'PU
 log('KPI update v2', kpiUpd.status === 200 && kpiUpd.data?.version > (kpiNew.data?.version || 0), `v=${kpiUpd.data?.version} (was v${kpiNew.data?.version})`);
 
 // 17. Schedule baseline create (idempotent — nếu đã có, version tăng)
-const baseline = await api(T, '/api/projects/2/schedule-baselines', { method: 'POST', body: JSON.stringify({ notes: 'E2E test baseline' }) });
+const baseline = await api(T, '/api/projects/1/schedule-baselines', { method: 'POST', body: JSON.stringify({ notes: 'E2E test baseline' }) });
 log('schedule baseline create', baseline.status === 200 && baseline.data?.version >= 1, `v=${baseline.data?.version}`);
 
 // 18. Schedule baseline list
-const baselines = await api(T, '/api/projects/2/schedule-baselines');
+const baselines = await api(T, '/api/projects/1/schedule-baselines');
 log('schedule baseline list', baselines.status === 200, `count=${baselines.data?.length}`);
 
 // 19. Shop drawing list (project-scoped)
-const sds = await api(T, '/api/projects/2/shop-drawings');
+const sds = await api(T, '/api/projects/1/shop-drawings');
 log('shop drawings list', sds.status === 200 && Array.isArray(sds.data), `count=${sds.data?.length}`);
 
 // 20. Shop PATCH (DRAFT/REJECTED only)
@@ -115,19 +115,20 @@ if (draftSd) {
 }
 
 // 22. Material submittal list
-const subs = await api(T, '/api/projects/2/material-submittals');
+const subs = await api(T, '/api/projects/1/material-submittals');
 log('material-submittals list', subs.status === 200, `count=${subs.data?.length}`);
 
 // 23. Notification prefs
 const prefs = await api(T, '/api/me/notification-prefs');
 log('notification prefs GET', prefs.status === 200, `channels=${JSON.stringify(prefs.data?.channels)}`);
+const prefsBefore = prefs.data;
 
 // 24. Notification prefs PUT
 const prefsPut = await api(T, '/api/me/notification-prefs', { method: 'PUT', body: JSON.stringify({ notify_email: false, notify_zalo: false }) });
 log('notification prefs PUT', prefsPut.status === 200, `email=${prefsPut.data?.channels?.email} zalo=${prefsPut.data?.channels?.zalo}`);
 
 // 25. Directive create
-const dir = await api(T, '/api/directives', { method: 'POST', body: JSON.stringify({ project_id: 2, body: 'E2E test directive' }) });
+const dir = await api(T, '/api/directives', { method: 'POST', body: JSON.stringify({ project_id: 1, body: 'E2E test directive' }) });
 log('directive create', dir.status === 200, `id=${dir.data?.id}`);
 
 // 26. Notification list (should include directive)
@@ -135,20 +136,56 @@ const notifs = await api(T, '/api/notifications?limit=5');
 log('notifications list', notifs.status === 200, `count=${notifs.data?.length}`);
 
 // 27. Contracts list
-const contracts = await api(T, '/api/projects/2/contracts');
+const contracts = await api(T, '/api/projects/1/contracts');
 log('contracts list', contracts.status === 200, `count=${contracts.data?.length}`);
 
 // 28. Daily reports list
-const drs = await api(T, '/api/projects/2/daily-reports');
+const drs = await api(T, '/api/projects/1/daily-reports');
 log('daily-reports list', drs.status === 200, `count=${drs.data?.length}`);
 
 // 29. Manpower list
-const mp = await api(T, '/api/projects/2/manpower');
+const mp = await api(T, '/api/projects/1/manpower');
 log('manpower list', mp.status === 200, `count=${mp.data?.length}`);
 
 // 30. /api/health (final)
 const health = await api(null, '/api/health');
 log('final health', health.status === 200, 'OK');
+
+// 31. Cleanup: this suite runs against the live dev DB — restore everything
+// it mutated (project 1 close, created issue/directive/KPI, shop patch, prefs).
+const rRevokeEnd = await api(T, '/api/projects/1/revoke-close', { method: 'POST' });
+log('cleanup: revoke-close project 1', rRevokeEnd.status === 200, `status=${rRevokeEnd.status}`);
+if (issueId) {
+  const { execSync } = await import('node:child_process');
+  try {
+    execSync(`bash backend/scripts/pg-ctl.sh psql -c "UPDATE directives SET issue_id = NULL WHERE issue_id = ${issueId}; DELETE FROM issues WHERE id = ${issueId};"`, { cwd: new URL('../..', import.meta.url).pathname });
+    log('cleanup: delete E2E issue', true, `id=${issueId}`);
+  } catch { log('cleanup: delete E2E issue', false, 'psql failed'); }
+}
+if (dir.data?.id) {
+  const { execSync } = await import('node:child_process');
+  try {
+    execSync(`bash backend/scripts/pg-ctl.sh psql -c "DELETE FROM directives WHERE id = ${dir.data.id};"`, { cwd: new URL('../..', import.meta.url).pathname });
+    log('cleanup: delete E2E directive', true, `id=${dir.data.id}`);
+  } catch { log('cleanup: delete E2E directive', false, 'psql failed'); }
+}
+if (kpiNew.data?.id) {
+  const { execSync } = await import('node:child_process');
+  try {
+    execSync(`bash backend/scripts/pg-ctl.sh psql -c "DELETE FROM kpi_targets WHERE kpi_code = 'TEST_E2E';"`, { cwd: new URL('../..', import.meta.url).pathname });
+    log('cleanup: delete E2E KPI', true, 'kpi_code=TEST_E2E');
+  } catch { log('cleanup: delete E2E KPI', false, 'psql failed'); }
+}
+if (draftSd) {
+  const restore = await api(T, `/api/shop-drawings/${draftSd.id}`, { method: 'PATCH', body: JSON.stringify({ progress_pct: draftSd.progress_pct ?? 0, name_vi: draftSd.name_vi }) });
+  log('cleanup: restore shop PATCH', restore.status === 200, `status=${restore.status}`);
+}
+if (prefsBefore?.channels) {
+  const rPrefs = await api(T, '/api/me/notification-prefs', { method: 'PUT', body: JSON.stringify({
+    notify_email: prefsBefore.channels.email, notify_zalo: prefsBefore.channels.zalo, zalo_user_id: prefsBefore.zalo_user_id,
+  }) });
+  log('cleanup: restore notification prefs', rPrefs.status === 200, `status=${rPrefs.status}`);
+}
 
 // Summary
 const pass = results.filter(r => r.ok).length;

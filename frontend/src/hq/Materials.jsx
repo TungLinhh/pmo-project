@@ -1,8 +1,7 @@
-// Material list page (Mục 6.3)
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.4) - Material Submittal workflow
+// Material list page (Mục 6.3) — submittal workflow: DRAFT → SUBMITTED → APPROVED/REJECTED (+SLA).
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { projects, getToken } from '../api/index.js';
+import { projects, getToken, preferDemoProject } from '../api/index.js';
 import { ICON } from '../icons.jsx';
 import PieChart from '../components/PieChart.jsx';
 import PieTooltip from '../components/PieTooltip.jsx';
@@ -24,7 +23,7 @@ export default function Materials() {
   useEffect(() => {
     projects.list().then(list => {
       setAllProjects(list);
-      if (!selectedProject && list[0]) setSelectedProject(list[0].id);
+      if (!selectedProject) setSelectedProject(preferDemoProject(list));
     });
   }, []);
 
@@ -141,10 +140,6 @@ export default function Materials() {
           }
         </div>
       </div>
-      <p className="empty" style={{ marginTop: 16, fontSize: 11 }}>
-        TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.4) - Material Submittal workflow đầy đủ.
-      </p>
-
       {/* Add material modal */}
       {showAddModal && (
         <div className="modal-backdrop" onClick={() => !addBusy && setShowAddModal(false)}>

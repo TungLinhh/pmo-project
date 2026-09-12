@@ -1,6 +1,6 @@
 # PMO MVP — Product Technical Documentation
 
-> **Version**: 0.3.0 · **Last updated**: 2026-09-05 · **Audience**: Engineers, technical PMs, integrators
+> **Version**: 0.4.0 · **Last updated**: 2026-09-12 · **Audience**: Engineers, technical PMs, integrators
 >
 > This document is the **single source of truth** for the PMO MVP. It replaces the previous collection of scattered docs (ARCHITECTURE, CODEBASE, USER_GUIDE, OPERATIONS, etc.). UML diagrams referenced from `docs/srs/`.
 
@@ -53,10 +53,13 @@ PMO MVP is a **construction project management system** built for a multi-zone c
 | **Procurement** | Material submittals, contracts, vendor management | Materials, Material Submittal, Master Data |
 | **Accounting** | Payment chain (contract → invoice → request → payment) | Payment, Contracts, Invoices |
 
-### 1.3 Out of scope (v0.3.0)
+### 1.3 Out of scope (v0.4.0)
 
 - Native mobile apps (web-responsive only)
-- Multi-tenant SaaS (single-tenant with optional `tenant_id` for future)
+- Full multi-tenant (HBG-only seam: `tenant_id` from user, membership backfilled)
+- S3 storage (interface + hardened local driver; S3 stub fails loud)
+- Nested departments (flat list; `parent_id` deferred)
+- Offline enqueue endpoint (CLIENT apply works on seeded rows; field app posts online)
 - Real-time collaboration (CRDTs, presence)
 - Gantt chart auto-scheduling (manual entry only)
 - BIM / 3D model viewer
@@ -100,10 +103,10 @@ PMO MVP is a **construction project management system** built for a multi-zone c
 
 | Choice | Why |
 |--------|-----|
-| **PostgreSQL (raw `pg`)** | Schema is mature (43 tables, 75 FKs, 105 indexes). Drizzle/Prisma add indirection without value at this size. Raw SQL gives full control over CTEs, window functions, `RETURNING`, `ON CONFLICT`. |
+| **PostgreSQL (raw `pg`)** | Schema is mature (51 tables). Raw SQL gives full control over CTEs, window functions, `RETURNING`, `ON CONFLICT`. |
 | **Express (not Fastify/Nest)** | Team familiarity, middleware ecosystem, simple. ~3k req/s is sufficient. |
 | **React + Vite (not Next.js)** | SPA with role-based routing; no SSR needed (internal tool). Vite gives fast dev loop + small bundle. |
-| **Bearer token (in-memory)** | Single-server deploy, no Redis needed. 32-char hex token stored in `Map<token, user>`. Logout invalidates immediately. |
+| **JWT + rotating refresh** | Stateless access (24h) + opaque single-use refresh (30d) + denylist. No Redis needed on one server. |
 | **multer (not busboy)** | Battle-tested, simple, sufficient for ≤20 file uploads per request. |
 | **Docker Compose** | Local dev parity. One command brings up PG + backend. |
 
@@ -122,15 +125,16 @@ HTTP request
 [3] Sub-router (e.g. /api/projects/:id mounted router) ← mergeParams: true
     │
     ▼
-[4] requireAuth middleware → looks up token in Map → sets req.user
+[4] requireAuth middleware → verifies JWT → reloads user row → sets req.user
     │
     ▼
-[5] requireRole(...) (if applied) → checks req.user.role
+[5] permissionMiddleware (module check) + requireRole(...) (if applied) + project-access (404 no-leak)
     │
     ▼
 [6] Handler:
-    ├── db.prepare(sql).runAsync/getAsync/allAsync
-    ├── withAudit(req, {...}, async (client) => {...})  ← atomic business + audit log
+    ├── db.prepare(sql).runAsync/getAsync/allAsync (NUMERIC arrives as number)
+    ├── checkTransition(resource, from, to) for status changes (422 on illegal jump)
+    ├── withAudit/txAudit(req, {...}, async (client) => {...})  ← atomic business + audit log
     │       │
     │       ├── BEGIN
     │       ├── business action
@@ -149,25 +153,17 @@ HTTP request
 ```
 backend/
 ├── src/
-│   ├── index.js                # 130 LOC — Express composition (mounts 22 routers + serves SPA)
-│   ├── lib/
-│   │   ├── auth.js             # requireAuth, requireRole, currentUser, in-memory token Map
-│   │   ├── tx.js               # withTransaction(client => ...) — BEGIN/COMMIT/ROLLBACK
-│   │   ├── with-audit.js       # withAudit(req, {action, resourceType, ...}, fn) — atomic + audit
-│   │   ├── validation.js       # validateShopDrawingTransition, validatePaymentChain, etc.
-│   │   ├── permissions.js      # role → permission matrix
-│   │   ├── permission-middleware.js
-│   │   ├── storage.js          # file upload paths, multipart config
-│   │   ├── excel.js            # xlsx parsing helpers
-│   │   └── zone_matcher.js     # normalize zone names (BOH → BOH, "Back of House" → BOH)
-│   ├── routes/                 # 22 files — see §4.4
+│   ├── index.js                # Express composition (24 routers + serves SPA + safe shutdown)
+│   ├── lib/                    # 18 helpers — see §4.2
+│   ├── routes/                 # 26 files — see §4.4
 │   ├── db/
-│   │   ├── index.js            # Pool, prepare/upsert helpers
-│   │   └── init.js             # applies drizzle migrations + creates indexes + seeds
+│   │   ├── index.js            # Single Pool, NUMERIC→number, upsert helper
+│   │   ├── migrate.js          # checksum ledger runner
+│   │   └── init.js             # migrate + indexes + sequences + seeds
 │   └── services/
-│       ├── notify.js           # notify(user, payload), notifyMany(...)
+│       ├── notify.js           # notify(user, payload), notifyMany(...) (in_app/email/zalo)
 │       ├── export.js           # CSV export
-│       └── ingest/             # 10 parsers — see §9
+│       └── ingest/             # 12 parsers — see §9
 ├── drizzle/                    # SQL migrations
 └── scripts/
     └── pg-ctl.sh               # local PG start/stop/backup (WSL/Linux)
@@ -192,13 +188,15 @@ frontend/
 
 ## 3. Data Model
 
-### 3.1 Tables (43 total)
+### 3.1 Tables (51 total)
 
 **Core (multi-tenant base)**
-- `tenants` — top-level org (e.g. `hbg = HBG Construction`)
-- `users` — login accounts, 7 roles
-- `projects` — top-level project (`BTE-WP4-HBC`, `LAWRENCE-STING-2`)
+- `tenants` — top-level org (`hbg = HBG Construction`)
+- `users` — login accounts: `role` + `is_ceo` flag, bcrypt `password_hash`, nullable `department_id`
+- `projects` — real projects only (`BTE-WP4-HBC`, `HBG-LVK-BCTH`; placeholder seeds removed), nullable `department_id`
 - `zones` — sub-areas within a project (`BOH`, `BPV`, `HPV-1BR`, etc.)
+- `departments` — flat list (`KT`, `TC`, `AT`, `VP`); chain scope, no nesting yet
+- `approval_chains` — `(department_id NULL=default, resource_type)` → `levels` JSONB (max 5, roles from matrix)
 
 **Construction**
 - `construction_schedule_items` — Gantt rows per zone (`plan_start_date`, `actual_end_date`, `progress_pct`, `baseline_version`)
@@ -209,7 +207,7 @@ frontend/
 - `rfa_log` — Request For Approval events
 
 **Shop drawings**
-- `shop_drawings` — drawing records with **L1-L5 approval columns** (`bql_l1_response`..`bql_l5_response`, `_date`, `_comment`), `status`, `planned_submit_date`, `actual_submit_date`
+- `shop_drawings` — drawing records with **L1-L5 level columns** (`bql_l1_response`..`bql_l5_response`, `_date`, `_comment`), `status`, `notes` (offline sync), `planned_submit_date`, `actual_submit_date`. Effective levels come from `approval_chains`, not the columns.
 
 **Materials**
 - `materials` — material catalog per project/zone (`material_code`, `progress_pct`, 4 request/delivery dates)
@@ -219,11 +217,16 @@ frontend/
 **Payments (4-step chain)**
 - `contracts` — contract with vendor (`amount`, `retention_pct`)
 - `invoices` — invoice against contract
-- `payment_requests` — request to pay invoice (status: DRAFT → SUBMITTED → APPROVED → PAID)
+- `payment_requests` — request to pay invoice (status: PENDING → APPROVED → PAID, REJECTED → DRAFT/PENDING)
 - `payments` — actual payment record (bank ref, paid_date)
+- `ar_contracts` + `ar_lines` — receivables from HSTT/MPM files (`kind`: invoice/payment/dossier)
+
+**Auth sessions**
+- `auth_refresh_tokens` — opaque rotating refresh tokens (`token_hash`, `expires_at`, `revoked_at`)
+- `auth_revoked_jti` — access-token denylist for logout
 
 **Daily reports (field)**
-- `daily_reports` — header (`report_date`, `weather_am/pm`, `prepared_by`, counters)
+- `daily_reports` — header (`report_date`, `weather_am/pm`, `prepared_by`, counters, `notes` for offline sync)
 - `daily_work_items` — tasks done today
 - `daily_manpower` — workers count by role
 - `daily_materials` — materials used
@@ -237,14 +240,16 @@ frontend/
 - `kpi_targets` — current/effective KPI targets per code (`effective_from`, `effective_to`)
 - `issues` — issue tracker (`severity`, `owner_user_id`, `project_id`, `status`)
 - `directives` — CEO/PMO directives on issues (`notify_to_user_ids[]`, `from_user_id`)
-- `audit_log` — universal audit trail (43 columns, JSONB `before/after/context/field_changes`)
+- `audit_log` — universal audit trail (JSONB `before/after/context/field_changes`, written in the same tx as the business change)
+- `notifications` — in-app + email/zalo results (`read_at`, `severity`, `resource_type`)
 - `notifications` — in-app + email notifications (`read_at`, `severity`, `resource_type`)
 - `offline_sync_queue` — field offline queue
 - `generic_sheets` — catch-all for unknown doc types
 - `business_processes` + `business_process_steps` — BP templates (`process_id`, `ordinal`, `name_vi`, `content_vi`)
 
 **Ingest support**
-- `file_uploads` — upload history (`original_filename`, `storage_key`, `status`, `report_json`)
+- `file_uploads` — upload history (`original_filename`, `storage_key`, `status`, `report_json`, `zone_id`, `relative_path`, `skip_reason`)
+- `schema_migrations` — ledger: every applied file + sha256 (`ran once, checksum-verified`)
 
 ### 3.2 Enums
 
@@ -258,19 +263,29 @@ frontend/
 
 ### 3.3 Schema migrations
 
-Located in `backend/drizzle/`:
+Located in `backend/drizzle/`, applied **exactly once** via the `schema_migrations` ledger (`db/migrate.js`): each file's sha256 is recorded; re-running skips; changed-after-apply → boot refuses (drift). First boot on a pre-ledger DB adopts existing files without re-running.
 
 | File | Purpose |
 |------|---------|
-| `0000_naive_nick_fury.sql` | Base schema (Drizzle-generated, 40+ tables) |
-| `9998_align_schema_with_routes.sql` | Patches: add `projects.pm_user_id`, `material_submittals.escalated_at`, drop NOT NULL on `materials.zone_id`, create `daily_photos` table + indexes, create `directives` table, create unique indexes for `db.upsert()` |
-| `9999_add_issues_table.sql` | Creates `issues` + `daily_infos` (not in initial Drizzle schema) |
+| `0000_naive_nick_fury.sql` | Base schema (Drizzle-generated) |
+| `0001_departments_chains.sql` | `departments`, `approval_chains`, `projects/users.department_id` |
+| `0002_sync_notes.sql` | `daily_reports.notes`, `shop_drawings.notes` (offline apply) |
+| `0003_file_uploads_zone.sql` | `file_uploads.zone_id` (was dev-only, broke fresh DBs) |
+| `9991_project_members.sql` | Membership seam (HBG-only backfill) |
+| `9992_auth_session.sql` | Refresh tokens + denylist |
+| `9993_auth_password.sql` | `password_hash` (bcrypt) |
+| `9994_payment_ar.sql` | `ar_contracts` + `ar_lines` |
+| `9995_schedule_source_status.sql` | `source_status` (raw text, display never uses it) |
+| `9996_item_upload_lineage.sql` | `upload_id` lineage on schedule/shop/materials |
+| `9997_batch_intake.sql` | `relative_path`, `skip_reason` on uploads |
+| `9998_align_schema_with_routes.sql` | Route-driven patches (must run after `9999`: explicit order, not alphabetical) |
+| `9999_add_issues_table.sql` | `issues` + `daily_infos` |
 
-**Why `9998` and `9999`?** Convention: regular migrations are `0000-9997`, patches are `9998+`. Patches run after the base, regardless of file order. See `db/init.js`.
+Sequences are resynced once at boot (`init.js`); inserts are single round-trip (no per-INSERT `setval`).
 
 ### 3.4 Multi-tenant readiness
 
-Every business table has `tenant_id` (or inherits via FK). Currently single-tenant (all `tenant_id = 1` = `hbg`). Code is multi-tenant-ready: `req.user.tenant_id` propagates through queries.
+HBG-only seam: `tenant_id` always comes from `req.user` (never hardcoded), `project_members` backfilled per tenant, cross-tenant reads/writes answer 404 (no leak). Full multi-tenant = manage memberships explicitly instead of the backfill.
 
 ---
 
@@ -278,7 +293,7 @@ Every business table has `tenant_id` (or inherits via FK). Currently single-tena
 
 ### 4.1 Composition (`src/index.js`)
 
-130 LOC. Pure composition layer. Mounts 22 routers + 3 middlewares + serves SPA in production.
+Pure composition layer. Mounts 24 routers + serves SPA in production. Sockets are tracked so `SIGTERM`/`SIGINT` always terminate (lingering keep-alive/half-open connections are destroyed after 2s; 10s force-exit).
 
 ```js
 import express from 'express';
@@ -299,71 +314,34 @@ app.use(express.static(join(__dirname, '..', '..', 'frontend', 'dist')));
 app.get('*', (req, res) => res.sendFile(join(__dirname, '..', '..', 'frontend', 'dist', 'index.html')));
 ```
 
-### 4.2 Lib helpers
+### 4.2 Lib helpers (18 files)
 
-#### `lib/auth.js` (115 LOC)
+#### `lib/auth.js` — JWT sessions
+- Access: stateless HS256, TTL `ACCESS_TTL_SEC` (24h). `requireAuth` verifies signature and reloads the user row (never trusts payload).
+- Refresh: opaque, rotating, single-use, 30d (`auth_refresh_tokens`); denylist (`auth_revoked_jti`) + `token_version` for logout-all.
 
-```js
-export function requireAuth(req, res, next) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  const user = token ? tokenMap.get(token) : null;
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  req.user = user;
-  req.token = token;
-  next();
-}
+#### `lib/tx.js` + `lib/with-audit.js` — one pool, atomic audit
+- **Single shared `pg` Pool** (`db/index.js`; `PG_POOL_MAX`, idle/connection timeouts, idle-client error handler). `tx(fn)` = BEGIN/COMMIT/ROLLBACK.
+- `withAudit(req, meta, fn)` (alias `txAudit`): business + `audit_log` in one tx. `defer: true` lets the business result fill `before/after` (used by sync CLIENT apply).
 
-export function requireRole(...allowed) {
-  return (req, res, next) => {
-    if (!allowed.includes(req.user.role)) return res.status(403).json({ error: 'Forbidden' });
-    next();
-  };
-}
-```
+#### `lib/transitions.js` — the only state machine
+`TRANSITIONS` per resource (`shop_drawing`, `payment_request`, `material_submittal`, `project`, `sync_item`); `checkTransition()` → routes answer 422 on illegal jumps.
 
-**`tokenMap`** is in-memory `Map<token, user>`. Cleared on process restart. Sufficient for single-server deploy.
+#### `lib/approval.js` — flexible chains
+`resolveChain(tenant, project, resource)`: department override → tenant default → null (legacy single-step). Max 5 levels (fits `bql_l1..l5`); `validateLevels()` checks role names against the matrix; ADMIN/CEO bypass per level.
 
-#### `lib/tx.js` (49 LOC)
+#### `lib/storage.js` — content-addressed files
+`storage.save/path/exists/remove` over a local driver (`UPLOADS_DIR`, key = `sha256.ext`, dedupe by content). `STORAGE_DRIVER=s3` fails loud (no SDK wired). Legacy `saveFile/getFilePath/fileExists` wrappers kept.
 
-```js
-export async function withTransaction(fn) {
-  const pool = getPool();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-```
+#### `lib/sync-apply.js` — offline CLIENT appliers
+Allowlist only (`construction_schedule_item.progress_pct`, `daily_report.notes`, `shop_drawing.notes` + validators). Anything else → 422, never silent.
 
-#### `lib/with-audit.js` (49 LOC)
+#### `db/migrate.js` — ledger runner
+`runMigrations()`: checksum ledger, drift refusal, pre-ledger adoption, explicit 9999-before-9998 order.
 
-Combines business action + audit log in one transaction. **Use this for any state-changing operation.**
-
-```js
-export async function withAudit(req, { action, resourceType, resourceId, before, after, context, fieldChanges, note }, fn) {
-  return withTransaction(async (client) => {
-    const result = await fn(client);
-    await client.query(
-      `INSERT INTO audit_log (tenant_id, user_id, user_name, action, resource_type, resource_id, before, after, context, field_changes, note, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())`,
-      [req.user.tenant_id, req.user.id, req.user.name, action, resourceType, resourceId,
-       JSON.stringify(before || null), JSON.stringify(after || null), JSON.stringify(context || null),
-       JSON.stringify(fieldChanges || null), note]
-    );
-    return result;
-  });
-}
-```
-
-#### `lib/db/index.js` — DB abstraction
+#### `db/index.js` — driver facts that matter
+- **Single Pool** (see above). Inserts are one round-trip; `RETURNING id` auto-added only when the table has an `id` column (probed once, cached).
+- **`NUMERIC` (oid 1700) parses to JS number** at the driver — money is never a string downstream (the `NaN tỷ` class).
 
 ```js
 const stmt = db.prepare('SELECT * FROM users WHERE id = $1');
@@ -382,14 +360,15 @@ const result = await db.upsert('projects', {
 
 ### 4.3 Database (`src/db/`)
 
-- **`index.js`** — Pool config, `prepare()`, `upsert()`, transaction
-- **`init.js`** — apply migrations, create unique indexes, seed tenant/users/projects/zones
+- **`index.js`** — single shared Pool, `prepare()`/`upsert()`, NUMERIC→number parsing, `buildDatabaseUrl()`
+- **`migrate.js`** — checksum ledger (`schema_migrations`), drift refusal, adoption
+- **`init.js`** — migrate + unique indexes + sequence resync + seeds (tenant, admin, BTE, zones, departments)
 
-### 4.4 Routes (22 files)
+### 4.4 Routes (26 files)
 
 | File | Mount | Endpoints | Purpose |
 |------|-------|-----------|---------|
-| `auth.js` | `/api/auth` | `POST /login`, `POST /logout`, `GET /me` | Login (returns 32-char token), logout, current user |
+| `auth.js` | `/api/auth` | `POST /login`, `POST /refresh`, `POST /logout`, `POST /logout-all` | JWT login (bcrypt), rotate refresh, logout, logout-all |
 | `me.js` | `/api/me` | `GET /`, `GET /permissions`, `GET /notification-prefs`, `PUT /notification-prefs` | Self-service: whoami, my permissions, notification preferences |
 | `projects.js` | `/api/projects` | 14 endpoints | List, close/revoke, zones, materials, contracts, payments, daily-reports, issues, construction-schedule, shop-drawings, material-breakdown, submittals (overdue/pending-supervisor), schedule-baselines |
 | `kpi.js` | `/api/kpis` | `GET /`, `POST /`, `GET /:kpi_code/history` | KPI current values + history |
@@ -405,12 +384,14 @@ const result = await db.upsert('projects', {
 | `daily.js` | `/api/daily*` | 6 endpoints | Daily reports CRUD, add manpower, **upload photos (multipart)**, **list photos**, **manpower rollup** |
 | `sync.js` | `/api/sync` | `GET /queue`, `POST /resolve` | Offline queue (field) |
 | `dashboard.js` | `/api/dashboard` | `GET /`, `GET /portfolio-kpi` | Tenant portrait + cross-project KPI |
-| `master-data.js` | `/api/master-data/:resource` | `GET /:resource`, `POST /:resource` | Generic CRUD for vendors/subcontractors/suppliers/workers/teams/cost_codes |
+| `master-data.js` | `/api/master-data/:resource` | `GET /:resource`, `POST /:resource` | Generic CRUD (vendors, subcontractors, teams, departments…) with required-column validation |
 | `business-process.js` | `/api/business-process/:code` | `GET /:code` | BP template by code |
 | `upload.js` | `/api/upload`, `/api/uploads` | `POST /` (multipart), `GET /` | Upload Excel, list uploads |
 | `wizard.js` | `/api/wizard*` | (see code) | 4-step Excel ingest wizard (analyze → map → commit → report) |
 | `otd.js` | `/api/projects/:id/otd` | `GET /?grace_days=0` | OTD KPI: on-time / late / total / by_zone / 6mo trend |
 | `jobs.js` | `/api/jobs` | `POST /escalate-tvgs`, `GET /escalate-tvgs/status` | TVGS escalation trigger + status |
+| `approval-chains.js` | `/api/approval-chains` | `GET /`, `POST /`, `DELETE /:id` | Chain config per (dept, resource) — admin/CEO |
+| `admin.js` | `/api/admin` | `GET /users`, `PATCH /users/:id` | User list (no hash) + department assign — admin/CEO |
 
 **Note**: Many routes use `Router({ mergeParams: true })` because they're mounted under `/api/projects/:id/...` and need `req.params.id` to be visible inside the sub-router. **This is the #1 source of "missing param" bugs** — never forget it.
 
@@ -430,22 +411,24 @@ export async function notify(req, userId, { title, body, severity, resourceType,
 
 Note: **no `link` or `is_read` columns**. Use `read_at IS NULL` for unread check, `resource_type` + `resource_id` for navigation target.
 
-#### `services/ingest/` (10 parsers)
+#### `services/ingest/` (12 parsers + `failures.js` + `index.js` router)
 
-| File | Doc type | Source sheets |
-|------|----------|---------------|
-| `shop_drawing.js` | Shop drawings | "Shop drawing", "Drawing" |
-| `construction_schedule.js` | Construction schedule | Multi-zone, multi-sheet |
-| `material_supply.js` | Material supply | Material sheets |
-| `subcontractor_directory.js` | Subcontractor list | Subcontractor sheets |
-| `resource_directory.js` | Workers/machinery | Resource sheets |
-| `daily_report.js` | Daily report (work items, manpower, materials, photos) | 1 sheet per report |
-| `rfa_log.js` | RFA log | RFA sheets |
-| `business_process.js` | BP templates | BP sheets |
-| `project_level.js` | Project meta | Project info sheet |
-| `generic_tabular.js` | Catch-all | Any other sheet |
+| File | Doc type |
+|------|----------|
+| `shop_drawing.js` | Shop drawings |
+| `construction_schedule.js` | Construction schedule (status derived, never trusted from text) |
+| `material_supply.js` | Material supply (MSA) |
+| `subcontractor_directory.js` | Subcontractor list |
+| `resource_directory.js` | Workers/machinery |
+| `daily_report.js` | Daily report (work items, manpower, materials, photos) |
+| `rfa_log.js` | RFA log |
+| `business_process.js` | BP templates |
+| `project_level.js` | Project meta |
+| `generic_tabular.js` | Catch-all (incl. `manpower_master_plan` monthly dossiers) |
+| `sp_ap.js` | Supplier payments (contract→invoice→PR→PAID) |
+| `payment_ar.js` | Receivables (contracts + monthly HSTT dossiers) |
 
-Each parser: `parseSheet(sheet, ctx) → { rows[], errors[] }` → `commit(rows, ctx) → { inserted, updated, skipped }`.
+Each parser: `parse(filePath, …) → { sheets[] }` → `commit(parsed, …) → { ok, errors, items[] }` (structured failures `{sheet,row,field,message,ref}`). Wizard: stage → configure → commit via `/api/upload[/:id/...]`.
 
 ---
 
@@ -483,15 +466,16 @@ Each parser: `parseSheet(sheet, ctx) → { rows[], errors[] }` → `commit(rows,
 | `ControlCenter.jsx` | `/hq` | 4-pillar dashboard (Construction / Shop / Material / Payment) with pie chart + hover tooltip |
 | `ProjectOverview.jsx` | `/hq/overview/:projectId` | Single project: KPIs, schedule, contacts |
 | `ProgressDetail.jsx` | `/hq/progress/:projectId` | Gantt chart view |
-| `ShopList.jsx` | `/hq/shop` | Shop drawing list + L1-L5 approve UI |
+| `ShopList.jsx` | `/hq/shop` | Shop drawing list + level approve UI (chain-aware) |
 | `Issues.jsx` | `/hq/issues` | Issue list with filters |
 | `IssueDetail.jsx` | `/hq/issues/:id` | Issue detail + directive form |
 | `Materials.jsx` | `/hq/materials` | Material catalog |
 | `Manpower.jsx` | `/hq/manpower` | Manpower rollup (4 tabs: Workers/Machinery/Teams/Suppliers) |
 | `Payment.jsx` | `/hq/payment` | 4-step payment chain UI |
 | `OTDPage.jsx` | `/hq/otd` | OTD KPI (on-time / late / by_zone / trend) |
-| `NotificationCenter.jsx` | `/hq/notifications` | All notifications with filters |
-| `Placeholders.jsx` | `/hq/*` | Stub pages for nav items not yet built |
+| `NotificationCenter.jsx` | `/hq/notifications` | All notifications with filters (in-app) |
+| `ReviewQueue.jsx` | `/hq/uploads` | Staged-file review queue + generic rows viewer |
+| `ChainConfig.jsx` | `/hq/approval-chains` | Chain editor + user↔department assignment |
 
 ### 5.4 Field screens (4)
 
@@ -500,16 +484,17 @@ Each parser: `parseSheet(sheet, ctx) → { rows[], errors[] }` → `commit(rows,
 | `FieldHome.jsx` | `/field` | Field home with shortcuts |
 | `DailyProgress.jsx` | `/field/progress` | Daily progress entry |
 | `DailyReportForm.jsx` | `/field/daily-report` | **NEW** — full daily report with photo upload + manpower |
-| `FieldStubs.jsx` | `/field/*` | Stubs for materials / shopdrawing / issues / sync |
+| `FieldStubs.jsx` | `/field/*` | Materials / shopdrawing / issues / sync queue + resolve |
 
 ### 5.5 Governance screens (3)
 
 | File | Route | Purpose |
 |------|-------|---------|
 | `AuditLog.jsx` | `/audit` | Audit log with filters + CSV export |
-| `MasterDataList.jsx` | `/governance/master-data` | List vendors/subcontractors/... |
-| `MasterDataEdit.jsx` | `/governance/master-data/:resource/:id?` | Edit form |
-| `Approval.jsx` | `/hq/approval` | Pending approvals hub |
+| `MasterDataList.jsx` | `/hq/master-data` | List vendors/subcontractors/departments/… |
+| `MasterDataEdit.jsx` | `/hq/master-data/edit` | Create form |
+| `Approval.jsx` | `/hq/approval` | Pending approvals hub (chain-aware shop approve) |
+| `ChainConfig.jsx` | `/hq/approval-chains` | Chains + departments + user assignment |
 
 ### 5.6 Reusable components (10)
 
@@ -571,27 +556,25 @@ Auto-includes `Authorization: Bearer <token>` from `localStorage.pmo_token`.
 
 ### 6.1 Login flow
 
-1. `POST /api/auth/login { email, password }` → `users WHERE email = ?` → check `is_ceo OR role` (dev mode: no password hash check)
-2. Generate 32-char hex token
-3. `tokenMap.set(token, { id, email, name, role, is_ceo, tenant_id })`
-4. Return `{ token, user: { id, email, name, role, is_ceo, tenant_id } }`
-5. Frontend stores in `localStorage.pmo_token`
-6. Subsequent requests: `Authorization: Bearer <token>`
-7. `POST /api/auth/logout` → `tokenMap.delete(token)`
+1. `POST /api/auth/login { email, password }` → bcrypt `password_hash` check
+2. Access JWT (24h) + opaque rotating refresh token (30d, single-use)
+3. Return `{ token, refresh_token, user: { id, email, name, role, is_ceo, tenant_id } }`
+4. Frontend stores both; `Authorization: Bearer <token>`; auto-refresh on 401
+5. `POST /api/auth/logout` revokes refresh + denies access jti; `/logout-all` bumps `token_version`
 
 ### 6.2 7 demo accounts
 
-| Email | Password | Role | `is_ceo` |
+| Email | Password (dev) | Role | `is_ceo` |
 |-------|----------|------|----------|
 | `admin@hbg.com` | `admin123` | `admin` | false |
-| `ceo@hbg.com` | `ceo123` | `ceo` | true |
-| `pm@hbg.com` | `pm123` | `pm` | false |
-| `pmo@hbg.com` | `pmo123` | `pmo` | false |
-| `site@hbg.com` | `site123` | `site` | false |
-| `procurement@hbg.com` | `proc123` | `procurement` | false |
-| `accounting@hbg.com` | `acc123` | `accounting` | false |
+| `ceo@hbg.com` | `admin123` | `pmo` | true |
+| `pm@hbg.com` | `admin123` | `pm` | false |
+| `pmo@hbg.com` | `admin123` | `pmo` | false |
+| `site@hbg.com` | `admin123` | `site` | false |
+| `procurement@hbg.com` | `admin123` | `procurement` | false |
+| `accounting@hbg.com` | `admin123` | `accounting` | false |
 
-**Note**: as of v0.3.0, passwords are NOT hashed (dev-only). All accounts use the plain password. **MUST be fixed before production deploy.**
+**Note**: demo shares one dev password (per-user passwords never worked — the old hardcode accepted only `admin123`). Passwords ARE bcrypt-hashed; set per-user hashes before production.
 
 ### 6.3 Permission matrix
 
@@ -625,38 +608,27 @@ router.post('/critical', requireRole('admin', 'ceo'), handler);  // role check
 
 ## 7. Business Workflows
 
-### 7.1 Shop Drawing L1-L5 Approval
+### 7.1 Shop Drawing approval (chain-aware)
 
-**State machine**:
+**State machine** (`lib/transitions.js`, illegal jumps → 422):
 
 ```
-DRAFT
-  ├─ POST /transition { to_status: 'SUBMITTED' } → SUBMITTED
-  │     ├─ POST /approve-level { level: 1, response: 'P' } → next level (or APPROVED if max)
-  │     │     ├─ 'P' (Pass) → status = 'IN_REVIEW_L<n+1>' or 'APPROVED' (if n === MAX_LEVEL)
-  │     │     ├─ 'F' (Fail) → status = 'REJECTED' → can be reverted to DRAFT
-  │     │     └─ 'C' (Comment) → status = 'IN_REVIEW_L<n>' (awaiting more)
-  │     └─ POST /approve-level { level: 1, response: 'F' } → REJECTED
-  └─ PATCH (only in DRAFT or REJECTED) → edit fields
-
-REJECTED
-  └─ POST /transition { to_status: 'DRAFT' } → DRAFT (re-edit)
+DRAFT → SUBMITTED → APPROVED | REJECTED ⇄ DRAFT (re-submit)
 ```
 
-**MAX_LEVEL = 5** (configurable in `routes/shop.js`). Schema uses `bql_l1_response`..`bql_l5_response`, `_date`, `_comment` columns.
+With a multi-level chain (`approval_chains`, resolved dept → default), approval goes level by level via `/approve-level { level, response: P|F|C }` — each level checks its configured role (ADMIN/CEO bypass). Pass at the final level → APPROVED; Fail anywhere → REJECTED. The direct `→ APPROVED` shortcut is rejected (422) under multi-level chains; with no chain (legacy) single-step approval stays allowed. Max 5 levels (fits `bql_l1..l5` columns).
 
 **GET /:id/approval-state** returns:
 ```json
 {
   "current_level": 2,
   "is_fully_approved": false,
-  "levels": {
-    "1": { "response": "P", "date": "2026-09-01", "comment": "OK", "approver": "pm@hbg.com" },
-    "2": { "response": "P", "date": "2026-09-03", "comment": "OK", "approver": "pmo@hbg.com" },
-    "3": null,
-    "4": null,
-    "5": null
-  }
+  "chain": [{ "level": 1, "role": "PM" }, { "level": 2, "role": "ADMIN" }],
+  "max_level": 2,
+  "levels": [
+    { "level": 1, "response": "P", "date": "2026-09-01", "comment": "OK", "is_current": false },
+    { "level": 2, "response": "PENDING", "is_current": true }
+  ]
 }
 ```
 
@@ -739,13 +711,12 @@ CONTRACT (vendor agreement, amount, retention_pct)
 ```http
 POST /auth/login
 Body: { email: "admin@hbg.com", password: "admin123" }
-→ 200 { token: "abc123...", user: { id, email, name, role, is_ceo, tenant_id } }
+→ 200 { token: "<jwt>", refresh_token: "<opaque>", user: { id, email, name, role, is_ceo, tenant_id } }
 → 401 { error: "Invalid credentials" }
 
-POST /auth/logout              (auth)
-→ 200 { ok: true }
-
-GET /auth/me                   (auth) → user object
+POST /auth/refresh  Body: { refresh_token } → 200 { token, refresh_token } (rotated, old one dead)
+POST /auth/logout              (auth) → revokes refresh + denies access jti
+POST /auth/logout-all          (auth) → bumps token_version (all sessions dead)
 ```
 
 ### 8.2 Me
@@ -910,6 +881,28 @@ POST /master-data/vendors                      → create
 ```http
 GET /business-process/:code                    → { ...process, steps[] }
 ```
+
+### 8.18 Approval chains & admin (Wave 2)
+
+```http
+GET /approval-chains[?resource_type=]           → chains + department labels
+POST /approval-chains      (admin/CEO) Body: { department_id|null, resource_type, levels:[{level,role,label}] }
+DELETE /approval-chains/:id (admin/CEO) → back to legacy single-step
+GET /admin/users           (admin/CEO) → users without password_hash
+PATCH /admin/users/:id     (admin/CEO) Body: { department_id|null }
+PATCH /projects/:id        (admin/CEO) Body: { name_vi?, package?, department_id? }
+```
+
+### 8.19 Sync resolve (CLIENT apply)
+
+```http
+POST /sync/resolve Body: { queue_id, winner: SERVER|CLIENT }
+→ SERVER: keep server record, mark RESOLVED (unchanged)
+→ CLIENT: apply resource_json onto server_record_id (allowlisted types/fields only)
+  + SYNC_APPLY audit with before/after, same tx; else 422. Owner or admin/CEO only.
+```
+
+**Money rule**: all `amount`/`total_value`/`retention_*`/`vat_*` fields arrive as JSON numbers (driver parses NUMERIC). Never string-concatenate them.
 
 ---
 
@@ -1083,24 +1076,32 @@ PGPASSWORD=pmo_dev_pwd psql -h 127.0.0.1 -p 5433 -U pmo_user -d pmo
 
 ## 13. Testing
 
-### 13.1 Test pyramid
+### 13.1 Suites (`tests/e2e/`, ~75 files)
 
-| Level | Tool | Coverage | Speed |
-|-------|------|----------|-------|
-| E2E API | Node fetch (in `tests/e2e/*.mjs`) | 70 tests | ~30s |
-| Schema verify | Node + `psql` | 15 tests | ~5s |
-| Schema vs SQL audit | Node regex | Variable | ~2s |
-| UI (Playwright) | Playwright + Chromium | Manual | ~60s |
+| Suite | What it guards |
+|-------|----------------|
+| `pipeline-guard.mjs` | **Full pipeline on scratch DB**: synth workbooks → upload→configure→commit → pillars/OTD → approve→pay → CLIENT sync → DROP. CI-safe. |
+| `demo-walkthrough.mjs` | 28 checks of the demo flow on real data |
+| `p5-golden.mjs` | Demo-data goldens (77 contracts, 248 PRs, AR sums, project set, empty bell) |
+| `p5-money.mjs` | Every amount is `number`; JS sum = SQL SUM; no NaN |
+| `ingest-happy.mjs` | Happy-path commits of the 6 minor ingestors |
+| `p3-*.mjs` | Ledger, single pool + safe shutdown, sequences, txAudit atomicity + defer, transitions 422 |
+| `approval-chains.mjs` | Chain enforce + roles + department override + negatives |
+| `p4-*.mjs` | Storage interface, deploy surface, CLIENT apply, container smoke |
+| `api/payment-sla/shop-approval/schema/browser` | Legacy CI chain (also in `npm test`) |
+| `cleanup-demo.mjs` | Removes test junk from dev DB (not a test) |
+| `lib.mjs` | Shared helpers (login/api/psql, no absolute paths) |
 
-### 13.2 E2E suites
+Rule: every suite cleans up what it creates; `cleanup-demo.mjs` sweeps leftovers.
+
+### 13.2 Commands
 
 ```bash
-npm test                   # all 4
-npm run test:api           # 29 tests — login, projects, issues, kpi, audit, etc.
-npm run test:payment       # 13 tests — payment 4-step + SLA
-npm run test:shop          # 13 tests — L1-L5 + TVGS escalation
-npm run test:schema        # 15 tests — tables, columns, FK, enum, indexes
-npm run test:browser       # UI smoke test via Cloudflare tunnel
+npm test                    # CI chain: api + payment-sla + shop-approval + schema
+node tests/e2e/pipeline-guard.mjs   # full pipeline on scratch DB (see 13.1)
+node tests/e2e/demo-walkthrough.mjs # 28 demo checks (needs dev DB + :3000)
+node tests/e2e/cleanup-demo.mjs     # sweep test junk from dev DB
+BASE_URL=http://localhost:3000 node tests/e2e/<name>.mjs  # any single suite
 ```
 
 ### 13.3 Schema vs SQL audit
@@ -1161,36 +1162,33 @@ docker compose up -d       # postgres + backend
 
 ### 14.2 Multi-server
 
-Not supported yet. Would require:
-- Redis for `tokenMap` (replace in-memory)
+Access tokens are stateless JWT (no shared session store needed); refresh rotation is a single-row UPDATE (safe on one PG). Would still need:
 - `pgbouncer` for PG connection pooling
-- Shared `data/uploads/` (NFS or S3)
+- Shared uploads volume (NFS) or the S3 driver
 
 ### 14.3 Database backup
 
 ```bash
 # Native
 ./backend/scripts/pg-ctl.sh backup
-# Output: data/backups/pmo-YYYY-MM-DD-HHMM.sql.gz
-
-# Cron (daily 2 AM)
-0 2 * * * /home/vutun/pmo_project/backend/scripts/pg-ctl.sh backup
 ```
 
-### 14.4 Production checklist (BEFORE real deploy)
+### 14.4 Coolify / VPS (container)
 
-- [ ] Hash passwords (bcrypt, currently dev-only)
+Build from `Dockerfile` (multi-stage `node:22-slim`). Env: `DATABASE_URL` (or `DB_*`), `JWT_SECRET` (**required**), `UPLOADS_DIR` (mount a volume). Entrypoint waits for PG → `init-db` (ledger, idempotent) → boot. See `.env.example`.
+
+### 14.5 Production checklist
+
+- [x] Hash passwords (bcrypt)
+- [x] Migrations ledgered + idempotent entrypoint
 - [ ] Set real `DB_PASSWORD` (not `pmo_dev_pwd`)
+- [ ] Set strong `JWT_SECRET`
 - [ ] HTTPS via reverse proxy (nginx + Let's Encrypt)
 - [ ] Set `NODE_ENV=production`
-- [ ] Enable rate limiting (currently disabled)
-- [ ] Set up automated backups + test restore
-- [ ] Monitor: `pm2` or `systemd` for restart on crash
-- [ ] Logs: ship to centralized (ELK / Loki)
-- [ ] Alerts: UptimeRobot or similar for `/api/health`
-- [ ] Replace demo accounts with real users
+- [ ] Automated backups + test restore
+- [ ] Monitor: `pm2`/`systemd`, alerts on `/api/health`
+- [ ] Replace demo accounts with real users (per-user password hashes)
 - [ ] CORS whitelist (currently open in dev)
-- [ ] File upload size limit (currently 100KB default — increase for photos)
 
 ---
 
@@ -1271,28 +1269,27 @@ docker compose restart backend
 | 2026-09-05 | White screen fix | 11 column mismatches fixed, schema-audit tool created | (in `9c66506`) |
 | 2026-09-05 | Cleanup | Tests/ folder, Docker PG, deleted CHECKLIST, dead code removed | `5de7f0d` |
 | 2026-09-05 | Docs v0.3.0 | Unified Product Technical Documentation | (this commit) |
+| 2026-09-11 | P3–P5 + Wave 2 | Pool/ledger/sequences/txAudit/transitions; departments + chains; storage/sync-apply/money-proof; cleanup | (this commit) |
+| 2026-09-12 | Docs v0.4.0 | README (VI), PTD v0.4.0, SRS refresh, pipeline-guard, LAWRENCE removal | (this commit) |
 
-### 16.1 Known limitations (v0.3.0)
+### 16.1 Known limitations (v0.4.0)
 
-1. **Plain-text passwords** — dev only, must hash for prod
-2. **No rate limiting** — disabled for admin convenience
-3. **In-memory token map** — single-server only, lost on restart
-4. **Photo upload** — Express default 100KB limit; increase for production
-5. **No real-time updates** — frontend polls (BellDropdown 30s)
-6. **No mobile native apps** — web responsive only
-7. **No multi-tenant UI** — schema supports it, UI is single-tenant
-8. **No file upload to S3** — local FS only
-9. **Audit log retention** — no auto-prune, grows forever
-10. **No email channel** — `delivery_status` exists, but no SMTP integration
+1. **Shared dev password** — all demo users `admin123`; set per-user hashes for prod
+2. **No real-time updates** — frontend polls (BellDropdown 30s)
+3. **No mobile native apps** — web responsive only
+4. **HBG-only tenant seam** — no multi-tenant UI
+5. **No S3 driver** — local FS only (stub fails loud)
+6. **Audit log retention** — no auto-prune, grows forever
+7. **Flat departments** — no nesting (`parent_id` deferred)
+8. **No offline enqueue** — CLIENT apply works; field app posts online
 
 ### 16.2 Roadmap (suggested)
 
-- v0.4: password hashing + real email notifications (SMTP)
-- v0.5: rate limiting + CSRF + security hardening
+- v0.5: per-user passwords UI + rate limiting review + audit prune
 - v0.6: WebSocket / SSE for real-time notifications
-- v0.7: S3 / Azure Blob for uploads
-- v0.8: Multi-tenant UI + admin panel
-- v0.9: Mobile app (React Native) for field
+- v0.7: S3 driver for uploads + AI image storage
+- v0.8: nested departments + multi-tenant admin
+- v0.9: offline enqueue endpoint for field app
 - v1.0: Gantt auto-scheduling + BIM viewer
 
 ---

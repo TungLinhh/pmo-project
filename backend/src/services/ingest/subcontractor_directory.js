@@ -34,15 +34,16 @@ export async function parse(filePath, projectId) {
   return { sheets, totalRows: sheets.reduce((s, x) => s + x.rows.length, 0) };
 }
 
-export async function commit(parsed, projectId) {
+export async function commit(parsed, projectId, tenantId) {
   const db = getDb();
+  if (tenantId == null) throw new Error('commit: tenantId required');
   const report = { doc_type: 'subcontractor_directory', ok: 0, errors: 0, items: [] };
   for (const sheet of parsed.sheets) {
     for (const [idx, row] of sheet.rows.entries()) {
       try {
         await db.upsert('subcontractors',
           { conflictCols: ['tenant_id', 'name'] },
-          { tenant_id: 1, name: row.name, capability_summary: row.capability_summary, status: row.status, is_internal_team: row.is_internal_team }
+          { tenant_id: tenantId, name: row.name, capability_summary: row.capability_summary, status: row.status, is_internal_team: row.is_internal_team }
         );
         report.ok++;
       } catch (e) {
@@ -53,7 +54,7 @@ export async function commit(parsed, projectId) {
   return report;
 }
 
-export async function ingestSubcontractorDirectory(filePath, projectId) {
+export async function ingestSubcontractorDirectory(filePath, projectId, tenantId) {
   const parsed = await parse(filePath, projectId);
-  return await commit(parsed, projectId);
+  return await commit(parsed, projectId, tenantId);
 }

@@ -2,10 +2,12 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 router.get('/:code', async (req, res) => {
   const db = getDb();

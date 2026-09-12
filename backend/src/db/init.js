@@ -1,53 +1,25 @@
 // Database initialization — PG only.
-// Applies drizzle migrations from drizzle/0000_*.sql (skips if already applied).
-// Seeds default tenant + admin user + demo projects + zones.
-// Also creates unique indexes required by upsert().
-import { readFileSync, readdirSync } from 'node:fs';
+// Migrations run through the schema_migrations ledger (lib: ./migrate.js),
+// then unique indexes + idempotent seeds below.
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { getDb, closeDb } from './index.js';
+import { runMigrations } from './migrate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const db = getDb();
 
 console.log('Initializing PostgreSQL database...');
 
-// Apply migrations
+// Apply migrations (ledger: each file once, checksum-verified)
 const drizzleDir = join(__dirname, '..', '..', 'drizzle');
-const alreadyApplied = await db.prepare(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tenants')`).getAsync();
-if (!alreadyApplied?.exists) {
-  const files = readdirSync(drizzleDir).filter(f => f.endsWith('.sql')).sort();
-  for (const f of files) {
-    const sql = readFileSync(join(drizzleDir, f), 'utf8');
-    console.log(`  Applying ${f}...`);
-    try {
-      await db.exec(sql);
-    } catch (e) {
-      console.error(`❌ Migration ${f} FAILED — aborting init: ${e.message}`);
-      await closeDb();
-      process.exit(1);
-    }
-  }
-  console.log(`✓ Applied ${files.length} migration(s)`);
-} else {
-  console.log(`✓ Schema already applied`);
-}
-
-// Patch tables that were added after initial drizzle migrations
-// (issues, directives — required by routes but missing from drizzle schema)
-// FATAL on failure: a half-migrated schema is worse than a loud abort.
-// Patches themselves must be additive/idempotent (IF NOT EXISTS) — never DROP.
-const patches = readdirSync(drizzleDir).filter(f => f.match(/^9\d{3}_/)).sort();
-for (const p of patches) {
-  const sql = readFileSync(join(drizzleDir, p), 'utf8');
-  try {
-    await db.exec(sql);
-  } catch (e) {
-    console.error(`❌ Patch ${p} FAILED — aborting init (schema may be partial): ${e.message}`);
-    await closeDb();
-    process.exit(1);
-  }
-  console.log(`✓ Applied patch ${p}`);
+try {
+  const { ran, skipped, total } = await runMigrations(db, drizzleDir);
+  console.log(`✓ Migrations: ${ran} applied, ${skipped} already applied (${total} files)`);
+} catch (e) {
+  console.error(`❌ Migration FAILED — aborting init: ${e.message}`);
+  await closeDb();
+  process.exit(1);
 }
 
 // Create unique indexes required by db.upsert() in ingestors
@@ -84,10 +56,22 @@ if (!userExists) {
   console.log('✓ Created admin user admin@hbg.com');
 }
 
-// Seed demo projects
+// Phase 2 auth: every login requires a bcrypt password_hash. Demo users keep
+// the shared dev password 'admin123' (hashed) so current demo logins survive;
+// per-user passwords were never functional (auth.js hardcode accepted only
+// admin123). Idempotent: only NULL hashes are set.
+const { default: bcrypt } = await import('bcryptjs');
+const unsetHashes = await db.prepare('SELECT id, email FROM users WHERE password_hash IS NULL').allAsync();
+for (const u of unsetHashes) {
+  const hash = await bcrypt.hash('admin123', 10);
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').runAsync(hash, u.id);
+  console.log(`✓ Set dev password hash for ${u.email}`);
+}
+
+// Seed demo projects — BTE only. (LAWRENCE-STING-2 was a placeholder seed,
+// removed: real projects come from user ingestion, e.g. HBG-LVK-BCTH.)
 const projects = [
   { code: 'BTE-WP4-HBC', name_vi: 'Khu du lịch sinh thái Bãi Tràm', name_en: 'Bãi Tràm Estates', package: 'MEP', rev_prefix: 'BTE-HBG' },
-  { code: 'LAWRENCE-STING-2', name_vi: 'Trường Lawrence Sting 2', name_en: 'LAWRENCE STING SCHOOL 2', package: 'MEP', rev_prefix: 'HBG-LS' },
 ];
 for (const p of projects) {
   const exists = await db.prepare('SELECT id FROM projects WHERE tenant_id = ? AND code = ?').getAsync(tenantId, p.code);
@@ -129,6 +113,60 @@ if (bteProject) {
   }
   console.log(`✓ Seeded ${zones.length} zones for BTE project`);
 }
+
+// Seed departments (Wave 2 approval chains). Idempotent; codes are stable
+// so approval_chains can reference them. Rename freely via master-data.
+const departments = [
+  { code: 'KT', name_vi: 'Kỹ thuật' },
+  { code: 'TC', name_vi: 'Thi công' },
+  { code: 'AT', name_vi: 'An toàn' },
+  { code: 'VP', name_vi: 'Văn phòng' },
+];
+for (const d of departments) {
+  const exists = await db.prepare('SELECT id FROM departments WHERE tenant_id = ? AND code = ?').getAsync(tenantId, d.code);
+  if (!exists) {
+    await db.prepare('INSERT INTO departments (tenant_id, code, name_vi) VALUES (?, ?, ?)').runAsync(tenantId, d.code, d.name_vi);
+    console.log(`✓ Created department ${d.code}`);
+  }
+}
+// HBG-only access seam: every user is a member of every project in their
+// tenant. Idempotent. (Multi-tenant later = manage project_members explicitly
+// instead of this backfill.)
+const allUsers = await db.prepare('SELECT id, tenant_id FROM users').allAsync();
+const allProjects = await db.prepare('SELECT id, tenant_id FROM projects').allAsync();
+let memberAdds = 0;
+for (const u of allUsers) {
+  for (const p of allProjects) {
+    if (u.tenant_id !== p.tenant_id) continue;
+    const has = await db.prepare('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?').getAsync(p.id, u.id);
+    if (!has) {
+      // explicit RETURNING: the db wrapper auto-appends RETURNING id, but this
+      // table's PK is (project_id, user_id) with no id column.
+      await db.prepare('INSERT INTO project_members (project_id, user_id) VALUES (?, ?) RETURNING project_id').runAsync(p.id, u.id);
+      memberAdds++;
+    }
+  }
+}
+if (memberAdds) console.log(`✓ Backfilled ${memberAdds} project memberships`);
+
+// One-time sequence resync (replaces the old per-INSERT setval magic):
+// external imports with explicit ids can leave <table>_id_seq behind MAX(id).
+// 3-arg setval with is_called=false on empty tables keeps the first-ever
+// insert at id 1 (2-arg form would skip to 2 — fatal for seeded tenant id=1).
+const seqTables = await db.prepare(
+  `SELECT t.tablename FROM pg_tables t
+   JOIN information_schema.columns c ON c.table_name = t.tablename
+     AND c.table_schema = 'public' AND c.column_name = 'id'
+   WHERE t.schemaname = 'public'`
+).allAsync();
+for (const { tablename } of seqTables) {
+  try {
+    await db.exec(`SELECT setval(pg_get_serial_sequence('"${tablename}"', 'id'),
+      GREATEST((SELECT COALESCE(MAX(id), 0) FROM "${tablename}"), 1),
+      EXISTS (SELECT 1 FROM "${tablename}"))`);
+  } catch { /* no serial sequence on id (e.g. ledger PK) — ignore */ }
+}
+console.log(`✓ Resynced sequences for ${seqTables.length} table(s)`);
 
 await closeDb();
 console.log(`\n✅ Database ready`);

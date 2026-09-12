@@ -1,5 +1,4 @@
-// UI-007: Notification Center
-// TODO: mục 43.6 - channels chưa chốt
+// UI-007: Notification Center (in-app only — Email/Zalo OA/Telegram/Push để sau).
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ICON } from '../icons.jsx';
@@ -130,7 +129,7 @@ export default function NotificationCenter() {
         }
       </div>
       <p className="empty" style={{ marginTop: 16, fontSize: 11 }}>
-        TODO: mục 43.6 - Notification channels (Email/Zalo OA/Telegram/Push) chưa chốt. MVP chỉ in-app.
+        Kênh khác (Email/Zalo OA/Telegram/Push) chưa làm — hiện chỉ in-app.
       </p>
     </div>
   );

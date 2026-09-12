@@ -6,11 +6,20 @@
 
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
+import { requireProjectAccess, requireResourceProject } from '../lib/project-access.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
+import { checkTransition } from '../lib/transitions.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
+// Project-scoped reads/writes below: tenant match + membership (admin/CEO bypass).
+router.use('/projects/:id', requireProjectAccess());
+router.use('/contracts/:id', requireResourceProject({ table: 'contracts' }));
+router.use('/invoices/:id', requireResourceProject({ table: 'invoices', via: { table: 'contracts', from: 'contract_id' } }));
+router.use('/payment-requests/:id', requireResourceProject({ table: 'payment_requests', via: [{ table: 'invoices', from: 'invoice_id' }, { table: 'contracts', from: 'contract_id' }] }));
 
 // Step 1: Create contract
 router.post('/projects/:id/contracts', async (req, res) => {
@@ -89,6 +98,12 @@ router.get('/invoices/:id/payment-requests', async (req, res) => {
   res.json(await db.prepare('SELECT * FROM payment_requests WHERE invoice_id = ? ORDER BY due_date ASC').allAsync(req.params.id));
 });
 
+// Invoices of one contract (Payment tab loads these per contract).
+router.get('/contracts/:id/invoices', async (req, res) => {
+  const db = getDb();
+  res.json(await db.prepare('SELECT * FROM invoices WHERE contract_id = ? ORDER BY invoice_date ASC').allAsync(req.params.id));
+});
+
 // Project-scoped payment-request queue (joins the contract→invoice chain)
 router.get('/projects/:id/payment-requests', async (req, res) => {
   const db = getDb();
@@ -103,6 +118,25 @@ router.get('/projects/:id/payment-requests', async (req, res) => {
      JOIN invoices i ON i.id = pr.invoice_id
      JOIN contracts c ON c.id = i.contract_id
      WHERE ${where.join(' AND ')} ORDER BY pr.due_date ASC LIMIT $${i}`
+  ).allAsync(...params));
+});
+
+// ---- AR (phải thu từ CĐT): read-only views over ar_contracts/ar_lines ----
+router.get('/projects/:id/ar-contracts', async (req, res) => {
+  const db = getDb();
+  res.json(await db.prepare(
+    'SELECT * FROM ar_contracts WHERE project_id = ? ORDER BY ordinal NULLS LAST, id'
+  ).allAsync(req.params.id));
+});
+
+router.get('/projects/:id/ar-lines', async (req, res) => {
+  const db = getDb();
+  const { sheet } = req.query;
+  const where = ['project_id = $1'];
+  const params = [req.params.id];
+  if (sheet) { where.push('source_sheet = $2'); params.push(sheet); }
+  res.json(await db.prepare(
+    `SELECT * FROM ar_lines WHERE ${where.join(' AND ')} ORDER BY ordinal NULLS LAST, id LIMIT 2000`
   ).allAsync(...params));
 });
 
@@ -122,6 +156,8 @@ router.put('/payment-requests/:id', requireRole('ceo', 'admin', 'accounting'), a
   }
   const old = await db.prepare('SELECT * FROM payment_requests WHERE id = ?').getAsync(req.params.id);
   if (!old) return res.status(404).json({ error: 'Not found' });
+  const t = checkTransition('payment_request', old.status, status);
+  if (!t.ok) return res.status(422).json({ error: t.error });
   try {
     await withAudit(req, {
       action: status === 'APPROVED' ? 'APPROVE' : status === 'REJECTED' ? 'REJECT' : 'STATUS_CHANGE',

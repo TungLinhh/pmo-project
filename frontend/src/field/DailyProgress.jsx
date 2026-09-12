@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projects, construction } from '../api/index.js';
+import { toast } from '../components/Toast.jsx';
 import { ICON } from '../icons.jsx';
 import ProjectPicker from '../components/ProjectPicker.jsx';
 
@@ -15,6 +16,7 @@ export default function DailyProgress() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [progress, setProgress] = useState(0);
   const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     projects.list().then(list => {
@@ -34,10 +36,19 @@ export default function DailyProgress() {
 
   const itemsForZone = items.filter(i => i.zone_code === zone);
 
-  function save(status) {
-    // TODO: POST /api/daily-reports (chưa implement)
-    alert(`Báo cáo đã ${status}.\n\n- Project: ${selectedProject}\n- Zone: ${zone}\n- Item: ${items.find(i => i.id === Number(selectedItem))?.name_vi}\n- Progress: ${progress}%\n- Notes: ${notes}`);
-    nav('/field/home');
+  async function save(status) {
+    if (!selectedItem) return;
+    setSaving(true);
+    try {
+      await construction.updateProgress(selectedProject, selectedItem, {
+        progress_pct: Number(progress) / 100,
+        note: notes ? `[site ${status}] ${notes}` : `[site ${status}]`,
+      });
+      toast.success(`Đã ${status}: ${progress}%`);
+      nav('/field/home');
+    } catch (e) {
+      toast.error('Lỗi: ' + e.message);
+    } finally { setSaving(false); }
   }
 
   return (
@@ -87,11 +98,11 @@ export default function DailyProgress() {
         )}
 
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="field-button secondary" disabled={!selectedItem} onClick={() => save('lưu nháp')}>
-            Lưu nháp
+          <button className="field-button secondary" disabled={!selectedItem || saving} onClick={() => save('lưu nháp')}>
+            {saving ? 'Đang lưu...' : 'Lưu nháp'}
           </button>
-          <button className="field-button" disabled={!selectedItem} onClick={() => save('gửi duyệt')}>
-            <ICON.arrow size={14} /> Gửi duyệt (Submit)
+          <button className="field-button" disabled={!selectedItem || saving} onClick={() => save('gửi duyệt')}>
+            <ICON.arrow size={14} /> {saving ? 'Đang gửi...' : 'Gửi duyệt (Submit)'}
           </button>
         </div>
       </div>

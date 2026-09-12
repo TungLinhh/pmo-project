@@ -1,5 +1,9 @@
 #!/bin/bash
-# Docker entrypoint — wait for PG, apply migrations + seed, then start backend
+# PMO Docker entrypoint — wait for PG, ensure schema+seed, then exec CMD.
+# Idempotent: init-db skips if tenants table already exists.
+# Called by compose `init` service (one-shot) AND by app entrypoint.
+# On the app service, the `init` service runs first (depends_on), so this
+# re-run is a no-op — but it's kept as a safety net for direct `docker run`.
 set -e
 
 echo "=== PMO Docker entrypoint ==="
@@ -21,10 +25,9 @@ if [ -n "$DB_HOST" ]; then
   done
 fi
 
-# Build DATABASE_URL from individual vars if not set
-if [ -z "$DATABASE_URL" ] && [ -n "$DB_HOST" ]; then
-  export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}"
-fi
+# No DATABASE_URL export here: the backend builds it from DB_* itself
+# (buildDatabaseUrl). Exporting a hand-built URL risks leaking or mangling
+# the password — let the app own connection-string construction.
 
 # Apply migrations + seed (idempotent). FATAL on failure — never boot on a half-migrated DB.
 echo "Initializing database..."

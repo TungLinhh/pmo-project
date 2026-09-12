@@ -58,7 +58,6 @@ export const WORKFLOW_COLORS = {
 };
 
 export function healthOf(project) {
-  // TODO: mục 43.10 — KPI governance chưa chốt
   // MVP: simple heuristic based on progress vs plan
   if (!project.progress_pct && project.progress_pct !== 0) return HEALTH.ON_TRACK;
   if (project.progress_pct >= 90) return HEALTH.ON_TRACK;

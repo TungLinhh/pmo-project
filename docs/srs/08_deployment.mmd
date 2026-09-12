@@ -4,28 +4,32 @@ flowchart TB
   end
 
   subgraph DMZ [DMZ / Public]
-    CF[Cloudflare Tunnel<br/>public.pmo.vutun.io]
+    CF[Cloudflare Tunnel<br/>public URL]
   end
 
-  subgraph Server [Application Server - WSL Ubuntu]
-    N[Node.js 20]
+  subgraph Server [Application Server]
+    N[Node.js 22]
     subgraph App [Express App port 3000]
-      API[REST API<br/>60+ endpoints]
+      API[REST API<br/>24 routers]
       STATIC[Static serve<br/>frontend/dist/]
-      RL[Rate Limiter<br/>5/min login<br/>100/min API]
-      AUTH[JWT-like Auth<br/>32 hex tokens]
+      AUTH[JWT access 24h<br/>+ rotating refresh 30d]
     end
     subgraph Frontend [Vite-built React SPA]
       HQ[HQ Module]
       FL[Field PWA]
-      GV[Governance]
+      GV[Governance + ChainConfig]
       WIZ[Upload Wizard]
     end
   end
 
   subgraph Data [Data Layer]
-    PG[(PostgreSQL 16<br/>127.0.0.1:5433<br/>pmo_user/pmo_dev_pwd<br/>40+ tables)]
-    FS[Local Filesystem<br/>backend/data/uploads/]
+    PG[(PostgreSQL 16<br/>51 tables<br/>migration ledger)]
+    FS[Uploads volume<br/>UPLOADS_DIR<br/>content-addressed keys]
+  end
+
+  subgraph Deploy [Deploy targets]
+    DC[Docker Compose<br/>postgres + init + app]
+    CO[Coolify<br/>Dockerfile + DATABASE_URL/JWT_SECRET]
   end
 
   subgraph External [External]
@@ -36,13 +40,14 @@ flowchart TB
   CF -->|HTTP localhost:3000| N
   N --> API
   N --> STATIC
-  API --> RL
   API --> AUTH
   API --> PG
   API --> FS
   STATIC --> Frontend
   EXCEL -.->|multipart| API
   Frontend -.->|JSON over HTTPS| API
+  DC -.->|runs| N
+  CO -.->|runs| N
 
   style CF fill:#FFB6C1
   style PG fill:#90EE90

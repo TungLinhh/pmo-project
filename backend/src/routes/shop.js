@@ -1,6 +1,7 @@
-// Shop drawing routes (transition + L1-L5 approval workflow)
-// Decision 2026-09-05: Multi-level approval từ L1 → L5 (sếp chưa chốt, default chạy 1 level — code linh hoạt)
-//
+// Shop drawing routes — submit + level approval (chain-aware, see lib/approval.js).
+// No chain configured → legacy single-step (DRAFT→SUBMITTED→APPROVED).
+// Chain configured → approve level-by-level via /approve-level; the direct
+// →APPROVED shortcut is rejected (422) for multi-level chains.
 // State machine:
 //   DRAFT → SUBMITTED → (REJECTED → DRAFT re-submit) | (BQL_L1_PASS → L2 → ... → L5 → APPROVED)
 //
@@ -11,14 +12,19 @@
 // Nếu pass L1 → L2 → L3 → L4 → L5 → APPROVED
 
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
+import { requireResourceProject, checkProjectAccess } from '../lib/project-access.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
-import { validateShopDrawingTransition, computeSlaDeadline } from '../lib/validation.js';
+import { checkTransition } from '../lib/transitions.js';
+import { resolveChain, satisfiesLevel } from '../lib/approval.js';
 import { notifyMany } from '../services/notify.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
+router.use('/:id', requireResourceProject({ table: 'shop_drawings' }));
 
 const MAX_LEVEL = 5; // L1-L5
 
@@ -28,6 +34,9 @@ router.post('/', async (req, res) => {
   const { project_id, zone_id, drawing_code, name_vi, name_en, planned_submit_date } = req.body || {};
   if (!project_id || !zone_id || !drawing_code) {
     return res.status(400).json({ error: 'project_id, zone_id, drawing_code required' });
+  }
+  if (!(await checkProjectAccess(req.user, Number(project_id)))) {
+    return res.status(404).json({ error: 'Project not found' });
   }
   try {
     const r = await withAudit(req, {
@@ -127,13 +136,17 @@ router.post('/:id/transition', async (req, res) => {
   if (!['SUBMITTED', 'APPROVED', 'REJECTED'].includes(to_status)) {
     return res.status(400).json({ error: `Invalid to_status: ${to_status}` });
   }
-  const validTransitions = {
-    DRAFT: ['SUBMITTED', 'REJECTED'],
-    SUBMITTED: ['APPROVED', 'REJECTED'],
-    REJECTED: ['SUBMITTED', 'DRAFT'],
-  };
-  if (!validTransitions[old.status]?.includes(to_status)) {
-    return res.status(400).json({ error: `Invalid transition: ${old.status} → ${to_status}` });
+  const t = checkTransition('shop_drawing', old.status, to_status);
+  if (!t.ok) {
+    return res.status(422).json({ error: t.error });
+  }
+  // Chain-aware: a multi-level chain must be approved level by level —
+  // the single-step shortcut is only legal with no chain (legacy) or 1 level.
+  if (to_status === 'APPROVED') {
+    const chain = await resolveChain(db, req.user.tenant_id, old.project_id, 'shop_drawing');
+    if (chain && chain.length > 1) {
+      return res.status(422).json({ error: `Chain ${chain.length} levels: duyệt từng level qua /approve-level` });
+    }
   }
   try {
     const result = await withAudit(req, {
@@ -160,7 +173,9 @@ router.post('/:id/transition', async (req, res) => {
 
 // ===== L1-L5 approve at specific level =====
 // POST /api/shop-drawings/:id/approve-level { level: 1, response: 'P'|'F'|'C', comment: '...' }
-router.post('/:id/approve-level', requireRole('admin', 'ceo', 'pmo', 'bql'), async (req, res) => {
+// Role gate is chain-aware: with a chain, the level's role decides (ADMIN/CEO
+// bypass); without a chain, legacy admin/ceo/pmo may approve any level.
+router.post('/:id/approve-level', async (req, res) => {
   const db = getDb();
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be integer' });
@@ -174,6 +189,20 @@ router.post('/:id/approve-level', requireRole('admin', 'ceo', 'pmo', 'bql'), asy
   }
   const old = await db.prepare('SELECT * FROM shop_drawings WHERE id = $1').getAsync(id);
   if (!old) return res.status(404).json({ error: 'Not found' });
+  // Chain-aware cap + per-level role (no chain = legacy: 5 levels, admin/ceo/pmo).
+  const chain = await resolveChain(db, req.user.tenant_id, old.project_id, 'shop_drawing');
+  const maxLvl = chain?.length ?? MAX_LEVEL;
+  if (lvl > maxLvl) {
+    return res.status(400).json({ error: `level must be 1-${maxLvl} (chain)` });
+  }
+  const requiredRole = chain?.[lvl - 1]?.role;
+  if (chain) {
+    if (requiredRole && !satisfiesLevel(req.user, requiredRole)) {
+      return res.status(403).json({ error: `L${lvl} yêu cầu role ${requiredRole}` });
+    }
+  } else if (!['admin', 'ceo', 'pmo'].includes(req.user.role) && !req.user.is_ceo) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   if (old.status === 'APPROVED') {
     return res.status(409).json({ error: 'Đã approved rồi, không thể duyệt thêm' });
   }
@@ -188,8 +217,8 @@ router.post('/:id/approve-level', requireRole('admin', 'ceo', 'pmo', 'bql'), asy
     }
   }
 
-  // Update
-  const newStatus = response === 'F' ? 'REJECTED' : (lvl === MAX_LEVEL ? 'APPROVED' : 'SUBMITTED');
+  // Update (chain-aware: final level approves, earlier levels keep SUBMITTED)
+  const newStatus = response === 'F' ? 'REJECTED' : (lvl === maxLvl ? 'APPROVED' : 'SUBMITTED');
   const approvalDate = newStatus === 'APPROVED' ? new Date().toISOString() : null;
 
   try {
@@ -222,7 +251,7 @@ router.get('/:id/approval-state', async (req, res) => {
   const db = getDb();
   const id = parseInt(req.params.id, 10);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'id must be integer' });
-  const sd = await db.prepare('SELECT id, drawing_code, status, bql_l1_response, bql_l1_date, bql_l1_comment, bql_l2_response, bql_l2_date, bql_l2_comment, bql_l3_response, bql_l3_date, bql_l3_comment, bql_l4_response, bql_l4_date, bql_l4_comment, bql_l5_response, bql_l5_date, bql_l5_comment, approval_date, rejected_reason FROM shop_drawings WHERE id = $1').getAsync(id);
+  const sd = await db.prepare('SELECT id, project_id, drawing_code, status, bql_l1_response, bql_l1_date, bql_l1_comment, bql_l2_response, bql_l2_date, bql_l2_comment, bql_l3_response, bql_l3_date, bql_l3_comment, bql_l4_response, bql_l4_date, bql_l4_comment, bql_l5_response, bql_l5_date, bql_l5_comment, approval_date, rejected_reason FROM shop_drawings WHERE id = $1').getAsync(id);
   if (!sd) return res.status(404).json({ error: 'Not found' });
   const levels = [];
   for (let i = 1; i <= MAX_LEVEL; i++) {
@@ -238,12 +267,15 @@ router.get('/:id/approval-state', async (req, res) => {
     });
   }
   const currentLevel = levels.find(l => l.is_current);
+  const chain = await resolveChain(db, req.user.tenant_id, sd.project_id ?? null, 'shop_drawing');
   res.json({
     id: sd.id,
     drawing_code: sd.drawing_code,
     status: sd.status,
     approval_date: sd.approval_date,
     rejected_reason: sd.rejected_reason,
+    chain: chain ?? null,
+    max_level: chain?.length ?? MAX_LEVEL,
     levels,
     current_level: currentLevel?.level || null,
     is_fully_approved: sd.status === 'APPROVED',

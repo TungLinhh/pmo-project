@@ -1,7 +1,7 @@
 // UI-004: Project Overview
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { projects, construction, shopApi, exportApi, getToken } from '../api/index.js';
+import { projects, construction, shopApi, exportApi, getToken, getUser, masterData } from '../api/index.js';
 import { toast } from '../components/Toast.jsx';
 import { ICON } from '../icons.jsx';
 
@@ -11,17 +11,29 @@ export default function ProjectOverview() {
   const [project, setProject] = useState(null);
   const [schedule, setSchedule] = useState([]);
   const [shopData, setShopData] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const me = getUser() || {};
+  const canEdit = me.role === 'admin' || me.is_ceo;
 
   useEffect(() => {
     projects.list().then(list => {
       const p = list.find(x => x.id === Number(id));
       setProject(p);
     });
+    if (canEdit) masterData.departments().then(setDepartments).catch(() => {});
     if (id) {
       construction.schedule(id).then(setSchedule);
       shopApi.drawings(id).then(setShopData);
     }
   }, [id]);
+
+  async function setDept(departmentId) {
+    try {
+      const updated = await projects.update(id, { department_id: departmentId ? Number(departmentId) : null });
+      setProject(updated);
+      toast.success('Đã gán bộ phận');
+    } catch (e) { toast.error('Lỗi: ' + e.message); }
+  }
 
   function openSchedule() {
     nav(`/hq/progress?project=${id}`);
@@ -65,6 +77,17 @@ export default function ProjectOverview() {
         <div>
           <h1>{project.code}</h1>
           <div className="meta">{project.name_vi} · {project.name_en} · Package: {project.package || '—'}</div>
+          <div className="meta" style={{ marginTop: 4 }}>
+            Bộ phận:{' '}
+            {canEdit ? (
+              <select value={project.department_id || ''} onChange={e => setDept(e.target.value)} style={{ fontSize: 12 }}>
+                <option value="">— chưa gán —</option>
+                {departments.map(d => <option key={d.id} value={d.id}>{d.code} · {d.name_vi}</option>)}
+              </select>
+            ) : (
+              project.department_id || '—'
+            )}
+          </div>
         </div>
         <div className="page-header-right">
           <button className="btn btn-secondary" onClick={openSchedule}><ICON.calendar size={13} />Schedule</button>

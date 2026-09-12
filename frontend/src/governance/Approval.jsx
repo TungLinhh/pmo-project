@@ -53,6 +53,8 @@ export default function Approval() {
   useEffect(() => { load(); }, []);
 
   // ===== Approve handlers - dùng chung confirmApprove =====
+  // Shop approve is chain-aware: with a multi-level chain, approve the
+  // current level (backend 422s the single-step shortcut); otherwise legacy.
   async function approveShop(id) {
     const ok = await confirm({
       title: 'Xác nhận duyệt',
@@ -63,13 +65,29 @@ export default function Approval() {
     if (!ok) return;
     setBusyId('shop-' + id);
     try {
-      await shopApi.transition(id, 'APPROVED', '');
-      toast.success('Shop drawing #' + id + ' đã APPROVED');
-      setShopItems(arr => arr.filter(x => x.id !== id));
+      const state = await shopApi.approvalState(id).catch(() => null);
+      if (state?.chain && state.chain.length > 1 && state.current_level) {
+        const r = await shopApi.approveLevel(id, state.current_level, 'P', '');
+        toast.success(`Shop drawing #${id} đã qua L${state.current_level}${r.status === 'APPROVED' ? ' (APPROVED)' : ''}`);
+        if (r.status === 'APPROVED') setShopItems(arr => arr.filter(x => x.id !== id));
+        else toggleExpandRefresh(id);
+      } else {
+        await shopApi.transition(id, 'APPROVED', '');
+        toast.success('Shop drawing #' + id + ' đã APPROVED');
+        setShopItems(arr => arr.filter(x => x.id !== id));
+      }
       setExpandedId(null);
     } catch (e) {
       toast.error('Approve thất bại: ' + e.message);
     } finally { setBusyId(null); }
+  }
+  // Refresh the expanded detail after a mid-chain level approval.
+  async function toggleExpandRefresh(id) {
+    const key = `shop-${id}`;
+    const r = await fetch('/api/shop-drawings/' + id + '/approval-state', {
+      headers: { Authorization: `Bearer ${getToken()}` }
+    }).then(r => r.json()).catch(() => null);
+    if (r) setDetailCache(prev => ({ ...prev, [key]: r }));
   }
   async function approveSubmittal(id) {
     const ok = await confirm({

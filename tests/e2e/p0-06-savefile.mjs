@@ -32,10 +32,14 @@ try {
   // --- legacy /api/upload: returns upload_id + staged file_uploads row + counts
   const require = createRequire('/home/vutun/pmo_project/backend/package.json');
   const XLSX = require('xlsx');
+  // Unique content per run: same sha256 would hit the (tenant_id, file_hash)
+  // upsert and return an old row outside the list's LIMIT window.
+  const runTag = `run ${Date.now()}`;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['STT', 'X', 'Y', 'CODE', 'Z', 'NAME', 'PROGRESS'],
     [1, '', '', 'TD-001', '', ' cong viec p0-06', 50],
+    [2, '', '', 'TD-002', '', runTag, 10],
   ]), 'TD P0-ZONE');
   const xlsxBuf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   const fd2 = new FormData();

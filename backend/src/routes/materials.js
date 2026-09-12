@@ -3,11 +3,14 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
+import { checkProjectAccess } from '../lib/project-access.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 router.post('/', async (req, res) => {
   const db = getDb();
@@ -15,6 +18,9 @@ router.post('/', async (req, res) => {
   const { project_id, code, material_code, zone_id, source_sheet, name_vi, name_en, progress_pct, notes } = req.body || {};
   const codeToUse = material_code || code;
   if (!project_id || !codeToUse) return res.status(400).json({ error: 'project_id and code required' });
+  if (!(await checkProjectAccess(req.user, Number(project_id)))) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
   try {
     const r = await withAudit(req, {
       action: 'CREATE', resourceType: 'material', resourceId: 0,

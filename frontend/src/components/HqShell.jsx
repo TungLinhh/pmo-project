@@ -1,5 +1,4 @@
 // App Shell (UI-002) - role-based sidebar, icon đơn sắc
-// TODO: tạm thời, chờ sếp tổng xác nhận (mục 43.2) - permission matrix
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { getUser, setToken, setUser } from '../api/index.js';
@@ -21,14 +20,16 @@ const MENU = [
     { to: '/hq/issues', label: 'Issues', icon: ICON.issues },
   ]},
   { group: 'Quản trị', items: [
+    { to: '/hq/uploads', label: 'Uploads', icon: ICON.upload },
     { to: '/hq/notifications', label: 'Thông báo', icon: ICON.bell },
     { to: '/hq/master-data', label: 'Master Data', icon: ICON.database },
     { to: '/hq/approval', label: 'Approval', icon: ICON.check },
+    { to: '/hq/approval-chains', label: 'Cấu hình duyệt', icon: ICON.check },
     { to: '/hq/audit', label: 'Audit Log', icon: ICON.audit },
   ]},
 ];
 
-// TODO: mục 43.2 - permission matrix chưa chốt, dùng simple role-based
+// Sidebar visibility per role (server still enforces everything).
 const ROLE_HIDE = {
   CEO: ['manpower', 'materials', 'master-data', 'approval'],
   PM: ['master-data', 'approval', 'audit'],

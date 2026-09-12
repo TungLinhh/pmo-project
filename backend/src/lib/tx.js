@@ -9,17 +9,8 @@
 //     return r;
 //   });
 
-import pg from 'pg';
-import { buildDatabaseUrl } from '../db/index.js';
-const { Pool } = pg;
-
-let _pool = null;
-export function getPool() {
-  if (!_pool) {
-    _pool = new Pool({ connectionString: buildDatabaseUrl(), max: 10 });
-  }
-  return _pool;
-}
+import { getPool } from '../db/index.js';
+export { getPool };
 
 export async function tx(fn) {
   const client = await getPool().connect();
@@ -36,14 +27,6 @@ export async function tx(fn) {
   }
 }
 
-// Audit-friendly tx: gọi auditLog như bình thường nhưng đảm bảo cùng transaction
-//   const auditAndBusiness = await txAudit(req, {
-//     action: 'STATUS_CHANGE', resourceType: 'shop_drawing', resourceId: id,
-//     before: old, after: updated, fieldChanges: [...], note: '...',
-//   }, async (client) => {
-//     // do business updates with `client` (not db.prepare)
-//     return updatedRow;
-//   });
-//   return res.json(auditAndBusiness);
-//
-// Implementation: dùng chung _pool ở db/index.js
+// Audit-friendly tx lives in ./with-audit.js as txAudit(req, meta, fn)
+// (alias withAudit) — business + audit_log COMMIT/ROLLBACK together
+// through the single shared pool from ../db/index.js.

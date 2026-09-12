@@ -3,11 +3,13 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 router.put('/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);

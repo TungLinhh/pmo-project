@@ -8,12 +8,15 @@
 
 import { Router } from 'express';
 import { requireAuth } from '../lib/auth.js';
+import { permissionMiddleware } from '../lib/permission-middleware.js';
 import { getDb } from '../db/index.js';
 import { withAudit } from '../lib/with-audit.js';
-import { validateMaterialSubmittalTransition, computeSlaDeadline } from '../lib/validation.js';
+import { checkTransition } from '../lib/transitions.js';
+import { computeSlaDeadline } from '../lib/validation.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth);
+router.use(permissionMiddleware);
 
 router.post('/', async (req, res) => {
   const db = getDb();
@@ -42,8 +45,8 @@ router.post('/:id/submit', async (req, res) => {
   const db = getDb();
   const old = await db.prepare('SELECT * FROM material_submittals WHERE id = ?').getAsync(req.params.id);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const v = validateMaterialSubmittalTransition(old.status, 'SUBMITTED');
-  if (!v.valid) return res.status(400).json({ error: v.error });
+  const v = checkTransition('material_submittal', old.status, 'SUBMITTED');
+  if (!v.ok) return res.status(422).json({ error: v.error });
   const submittedDate = new Date().toISOString().slice(0, 10);
   const slaDeadline = computeSlaDeadline(submittedDate, old.sla_days || 7);
   const supervisorDeadline = computeSlaDeadline(submittedDate, old.supervisor_approval_days || 3);
@@ -78,8 +81,8 @@ router.post('/:id/reject', async (req, res) => {
   if (!reason) return res.status(400).json({ error: 'rejection reason required' });
   const old = await db.prepare('SELECT * FROM material_submittals WHERE id = ?').getAsync(req.params.id);
   if (!old) return res.status(404).json({ error: 'Not found' });
-  const v = validateMaterialSubmittalTransition(old.status, 'REJECTED');
-  if (!v.valid) return res.status(400).json({ error: v.error });
+  const v = checkTransition('material_submittal', old.status, 'REJECTED');
+  if (!v.ok) return res.status(422).json({ error: v.error });
   try {
     const result = await withAudit(req, {
       action: 'REJECT', resourceType: 'material_submittal', resourceId: Number(req.params.id),
@@ -108,6 +111,8 @@ router.post('/:id/approve', async (req, res) => {
   const db = getDb();
   const old = await db.prepare('SELECT * FROM material_submittals WHERE id = ?').getAsync(req.params.id);
   if (!old) return res.status(404).json({ error: 'Not found' });
+  const v = checkTransition('material_submittal', old.status, 'APPROVED');
+  if (!v.ok) return res.status(422).json({ error: v.error });
   try {
     const result = await withAudit(req, {
       action: 'APPROVE', resourceType: 'material_submittal', resourceId: Number(req.params.id),
