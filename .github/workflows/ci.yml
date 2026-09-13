@@ -15,24 +15,17 @@ jobs:
   backend-lint:
     name: Backend syntax check
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # Workspaces repo: always install from the root (member-level
+      # `npm ci` replaces the whole root node_modules per member lockfile).
       - name: Install deps
-        run: npm ci --omit=dev
-      - name: Syntax check
-        run: node --check src/index.js
-      - name: Lint all lib + routes
-        run: |
-          for f in src/lib/*.js src/routes/*.js; do
-            node --check "$f" || exit 1
-          done
-          echo "✅ all $(ls src/lib/*.js src/routes/*.js | wc -l) files OK"
+        run: npm ci
+      - name: Lint backend
+        run: npm run lint --workspace=backend
 
   backend-tests:
     name: Backend E2E tests
@@ -64,56 +57,58 @@ jobs:
       PGPASSWORD: ${{ env.PG_PASSWORD }}
       PGDATABASE: pmo
       BASE_URL: http://localhost:3000
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # Workspaces repo: single root install (member-level `npm ci` would
+      # replace the whole root node_modules per member lockfile).
       - name: Install deps
         run: npm ci
+      # Backend serves frontend/dist unconditionally (backend/src/index.js),
+      # and dist/ is git-ignored — build it before starting the server.
+      - name: Build frontend
+        run: npm run build --workspace=frontend
       - name: Apply migrations
-        run: node src/db/init.js
+        run: node backend/src/db/init.js
       - name: Start backend
         run: |
-          node src/index.js &
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          node backend/src/index.js &
+          for i in $(seq 1 15); do
             if curl -s http://localhost:3000/api/health > /dev/null; then
               echo "backend ready"
               break
             fi
             sleep 1
           done
+      # Order matters: schema.mjs asserts audit_log has rows, so it runs
+      # LAST, after the suites that generate audit activity.
       - name: Run E2E suite
         run: |
-          cd ..
-          node tests/e2e/schema.mjs
           node tests/e2e/api.mjs
           node tests/e2e/payment-sla.mjs
           node tests/e2e/shop-approval.mjs
+          node tests/e2e/schema.mjs
 
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # Workspaces repo: single root install, then build via workspace.
       - name: Install deps
         run: npm ci
       - name: Build
-        run: npm run build
+        run: npm run build --workspace=frontend
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: dist/
+          path: frontend/dist/
           retention-days: 7
 
   schema-audit:

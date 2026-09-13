@@ -2,7 +2,7 @@
 // login/fetch/psql. Rules: no absolute paths (use ROOT), no hardcoded ports
 // except BASE_URL default, throwaway rows must be cleaned by the test.
 //   import { api, loginAs, psql, ok, summary } from '../e2e/lib.mjs';
-import { execSync } from 'node:child_process';
+import { psqlQuery } from '../tools/env.mjs';
 
 export const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 export const BASE = process.env.BASE_URL || 'http://localhost:3000';
@@ -35,10 +35,9 @@ export const loginAs = async (email) => (await api('/api/auth/login', {
 export const auth = (token) => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
 export const J = (token, body) => ({ headers: auth(token), body: JSON.stringify(body) });
 
-// psql against the DEV database via the repo control script.
-// Returns first line of -t -A output (strips the 'INSERT 0 1'-style tags
-// psql prints for RETURNING queries).
-export const psql = (sql) => execSync(
-  `bash backend/scripts/pg-ctl.sh psql -t -A -c "${sql.replace(/"/g, '\\"')}"`,
-  { encoding: 'utf8', cwd: ROOT }
-).trim().split('\n')[0];
+// psql against the target database via env-driven client (PGHOST/PGPORT/
+// PGUSER/PGPASSWORD/PGDATABASE/PSQL_BIN). Portable: works on CI runners,
+// unlike backend/scripts/pg-ctl.sh which is local-dev only (hardcoded
+// Homebrew binary path + dev password). Returns first line of -t -A output
+// (strips the 'INSERT 0 1'-style tags psql prints for RETURNING queries).
+export const psql = (sql) => psqlQuery(sql).split('\n')[0];

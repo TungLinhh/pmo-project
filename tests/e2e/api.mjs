@@ -1,6 +1,6 @@
 // E2E test toàn bộ flow PMO MVP
 // Chạy: BASE_URL=http://localhost:3000 node tests/e2e/api.mjs (cần backend running)
-import { apiBase } from '../tools/env.mjs';
+import { apiBase, psqlQuery } from '../tools/env.mjs';
 
 const BASE = apiBase();
 const results = [];
@@ -156,23 +156,20 @@ log('final health', health.status === 200, 'OK');
 const rRevokeEnd = await api(T, '/api/projects/1/revoke-close', { method: 'POST' });
 log('cleanup: revoke-close project 1', rRevokeEnd.status === 200, `status=${rRevokeEnd.status}`);
 if (issueId) {
-  const { execSync } = await import('node:child_process');
   try {
-    execSync(`bash backend/scripts/pg-ctl.sh psql -c "UPDATE directives SET issue_id = NULL WHERE issue_id = ${issueId}; DELETE FROM issues WHERE id = ${issueId};"`, { cwd: new URL('../..', import.meta.url).pathname });
+    psqlQuery(`UPDATE directives SET issue_id = NULL WHERE issue_id = ${issueId}; DELETE FROM issues WHERE id = ${issueId};`);
     log('cleanup: delete E2E issue', true, `id=${issueId}`);
   } catch { log('cleanup: delete E2E issue', false, 'psql failed'); }
 }
 if (dir.data?.id) {
-  const { execSync } = await import('node:child_process');
   try {
-    execSync(`bash backend/scripts/pg-ctl.sh psql -c "DELETE FROM directives WHERE id = ${dir.data.id};"`, { cwd: new URL('../..', import.meta.url).pathname });
+    psqlQuery(`DELETE FROM directives WHERE id = ${dir.data.id};`);
     log('cleanup: delete E2E directive', true, `id=${dir.data.id}`);
   } catch { log('cleanup: delete E2E directive', false, 'psql failed'); }
 }
 if (kpiNew.data?.id) {
-  const { execSync } = await import('node:child_process');
   try {
-    execSync(`bash backend/scripts/pg-ctl.sh psql -c "DELETE FROM kpi_targets WHERE kpi_code = 'TEST_E2E';"`, { cwd: new URL('../..', import.meta.url).pathname });
+    psqlQuery(`DELETE FROM kpi_targets WHERE kpi_code = 'TEST_E2E';`);
     log('cleanup: delete E2E KPI', true, 'kpi_code=TEST_E2E');
   } catch { log('cleanup: delete E2E KPI', false, 'psql failed'); }
 }

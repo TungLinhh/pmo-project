@@ -143,10 +143,7 @@ if (m4.status === 200) {
 
 // Cleanup: everything lives under the throwaway project.
 try {
-  const { execSync } = await import('node:child_process');
-  const P = `bash backend/scripts/pg-ctl.sh psql -c`;
-  const CWD = new URL('../..', import.meta.url).pathname;
-  const run = (sql) => execSync(`${P} "${sql}"`, { encoding: 'utf8', cwd: CWD });
+  const run = (sql) => psqlQuery(sql);
   run(`DELETE FROM payments WHERE payment_request_id IN (SELECT pr.id FROM payment_requests pr JOIN invoices i ON i.id = pr.invoice_id JOIN contracts c ON c.id = i.contract_id WHERE c.project_id = ${PID});`);
   run(`DELETE FROM payment_requests WHERE invoice_id IN (SELECT i.id FROM invoices i JOIN contracts c ON c.id = i.contract_id WHERE c.project_id = ${PID});`);
   run(`DELETE FROM invoices WHERE contract_id IN (SELECT id FROM contracts WHERE project_id = ${PID});`);

@@ -22,6 +22,11 @@ jobs:
           POSTGRES_PASSWORD: pmo_dev_pwd
           POSTGRES_DB: pmo
         ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5432/pmo
     steps:
@@ -38,8 +43,11 @@ jobs:
         run: npm ci
       - name: Verify backend deps resolve
         run: node -e "import('pg').then(() => console.log('pg ok'))"
+      - name: Wait for Postgres
+        run: |
+          node -e "import('pg').then(async ({default:{Pool}}) => { const p = new Pool({ connectionString: process.env.DATABASE_URL }); for (let i = 0; i < 60; i++) { try { await p.query('SELECT 1'); console.log('pg ready'); await p.end(); process.exit(0); } catch (e) { await new Promise(r => setTimeout(r, 1000)); } } console.error('pg not ready'); process.exit(1); })"
       - name: Build frontend
-        run: cd frontend && npm run build
+        run: npm run build --workspace=frontend
       - name: Apply migrations
         run: node backend/src/db/init.js
       - name: Restart service
@@ -54,8 +62,11 @@ jobs:
           script: |
             cd /opt/pmo_project
             git pull origin main
-            cd backend && npm ci --omit=dev
-            cd ../frontend && npm ci && npm run build
+            # Workspaces repo: single root install (member-level `npm ci`
+            # would replace the whole root node_modules). Full install
+            # because vite (frontend devDep) is needed for the build.
+            npm ci
+            npm run build --workspace=frontend
             sudo systemctl restart pmo-backend
             sleep 3
             curl -fsS http://localhost:3000/api/health
