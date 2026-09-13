@@ -14,6 +14,13 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS closed_by INTEGER;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS close_reason TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS closed_revoked_at TIMESTAMP;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS closed_revoked_by INTEGER;
-ALTER TABLE directives ADD COLUMN IF NOT EXISTS issued_by INTEGER REFERENCES users(id);
-ALTER TABLE directives ADD COLUMN IF NOT EXISTS due_date TIMESTAMP;
-ALTER TABLE directives ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+-- directives is created later by 9999 (migration runner orders 9999 after all
+-- rank-0 files), so guard: on a truly fresh DB this table doesn't exist yet
+-- when 0004 runs; 9999 already creates it WITH these columns.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'directives') THEN
+    ALTER TABLE directives ADD COLUMN IF NOT EXISTS issued_by INTEGER REFERENCES users(id);
+    ALTER TABLE directives ADD COLUMN IF NOT EXISTS due_date TIMESTAMP;
+    ALTER TABLE directives ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
+  END IF;
+END $$;
