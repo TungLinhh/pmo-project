@@ -48,13 +48,14 @@ if (junkProjects) {
 }
 
 // Common-code leftovers (any project, incl. real ones — patterns are test-only)
-exec(`DELETE FROM shop_drawings WHERE drawing_code LIKE 'TR-TEST-%' OR drawing_code LIKE 'CH-TEST-%' OR drawing_code LIKE 'CH-DEPT-%' OR drawing_code LIKE 'REJ-TEST-%' OR drawing_code LIKE 'TEST-L5-%';`);
+exec(`DELETE FROM shop_drawings WHERE drawing_code LIKE 'TR-TEST-%' OR drawing_code LIKE 'CH-TEST-%' OR drawing_code LIKE 'CH-DEPT-%' OR drawing_code LIKE 'REJ-TEST-%' OR drawing_code LIKE 'TEST-L5-%' OR drawing_code LIKE 'P0-07%';`);
 exec(`DELETE FROM material_submittals WHERE submittal_code LIKE 'TR-MS-%' OR submittal_code LIKE 'TEST-ESC-%' OR submittal_code LIKE 'SUB-TEST-%' OR submittal_code LIKE 'REJ-MS-%';`);
 exec(`DELETE FROM payments WHERE payment_request_id IN (SELECT id FROM payment_requests WHERE request_no LIKE 'TR-PR-%' OR request_no LIKE 'PR-TEST-%' OR request_no LIKE 'PR-NEG-%');`);
 exec(`DELETE FROM payment_requests WHERE request_no LIKE 'TR-PR-%' OR request_no LIKE 'PR-TEST-%' OR request_no LIKE 'PR-NEG-%';`);
 exec(`DELETE FROM invoices WHERE invoice_no LIKE 'TR-INV-%' OR invoice_no LIKE 'INV-TEST-%';`);
 exec(`DELETE FROM contracts WHERE contract_no LIKE 'TR-CT-%' OR contract_no LIKE 'CNT-TEST-%';`);
 exec(`DELETE FROM zones WHERE code LIKE 'SEQ-%';`);
+exec(`DELETE FROM materials WHERE material_code LIKE 'TEST%';`);
 exec(`DELETE FROM directives WHERE body LIKE 'directive-p0-05-%' OR body = 'E2E test directive';`);
 exec(`DELETE FROM issues WHERE title = 'E2E test issue';`);
 exec(`DELETE FROM kpi_targets WHERE kpi_code = 'TEST_E2E';`);

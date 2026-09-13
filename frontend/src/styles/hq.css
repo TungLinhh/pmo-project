@@ -161,7 +161,7 @@
 .pillar-card .breakdown .row { display: flex; justify-content: space-between; font-size: 12px; }
 .pillar-card .breakdown .row .k { color: var(--c-text-2); }
 .pillar-card .breakdown .row .v { font-weight: 600; color: var(--c-text); font-variant-numeric: tabular-nums; }
-.pillar-card .bar { background: #f1f5f9; height: 6px; border-radius: 3px; overflow: hidden; margin: 8px 0 4px; }
+.pillar-card .bar { background: var(--c-border); height: 6px; border-radius: 3px; overflow: hidden; margin: 8px 0 4px; }
 .pillar-card .bar-fill { height: 100%; background: var(--c-accent); border-radius: 3px; transition: width 0.3s; }
 .pillar-card .bar-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--c-text-2); }
 .pillar-card .warnings {
@@ -220,13 +220,14 @@ table th {
   top: 0;
   z-index: 1;
 }
-table td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; font-size: 12.5px; color: var(--c-text); }
+table td { padding: 7px 12px; border-bottom: 1px solid var(--c-border); font-size: 12.5px; color: var(--c-text); }
 table tr:last-child td { border-bottom: none; }
 table tbody tr:hover { background: var(--c-surface-2); }
-table tr.exception { background: #fffbeb; }
-table tr.exception:hover { background: #fef3c7; }
-table tr.critical { background: #fef2f2; }
-table tr.critical:hover { background: #fee2e2; }
+/* Row states use themed translucent backgrounds — never hardcoded hex (dark-mode bug). */
+table tr.exception { background: var(--c-watch-bg); }
+table tr.exception:hover { background: var(--c-surface-3); }
+table tr.critical { background: var(--c-critical-bg); }
+table tr.critical:hover { background: var(--c-surface-3); }
 table .num { text-align: right; font-variant-numeric: tabular-nums; }
 table .center { text-align: center; }
 table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3px; font-size: 11.5px; color: var(--c-text-2); font-family: 'SF Mono', Menlo, monospace; }
@@ -239,7 +240,7 @@ table code { background: var(--c-surface-2); padding: 1px 5px; border-radius: 3p
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
-.cell-bar .bar { flex: 1; height: 4px; background: #f1f5f9; border-radius: 2px; overflow: hidden; min-width: 40px; }
+.cell-bar .bar { flex: 1; height: 4px; background: var(--c-border); border-radius: 2px; overflow: hidden; min-width: 40px; }
 .cell-bar .bar .fill { height: 100%; background: var(--c-accent); }
 
 /* Stat strip (multi-stat row) */

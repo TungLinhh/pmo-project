@@ -41,19 +41,23 @@ export default function Payment() {
   useEffect(() => {
     if (!selectedProject) return;
     setLoading(true);
-    fetch(`/api/projects/${selectedProject}/contracts`, { headers: { Authorization: `Bearer ${getToken()}` }})
-      .then(r => r.json())
-      .then(async cs => {
-        setContracts(cs);
+    // 3 bulk requests (was N+1 fan-out: 77 contracts → hundreds of sequential
+    // fetches that left the tab stuck on Loading). Group client-side below.
+    const authH = { Authorization: `Bearer ${getToken()}` };
+    Promise.all([
+      fetch(`/api/projects/${selectedProject}/contracts`, { headers: authH }).then(r => r.json()).catch(() => []),
+      fetch(`/api/projects/${selectedProject}/invoices?limit=1000`, { headers: authH }).then(r => r.json()).catch(() => []),
+      fetch(`/api/projects/${selectedProject}/payment-requests?limit=1000`, { headers: authH }).then(r => r.json()).catch(() => []),
+    ]).then(async ([cs, invList, prList]) => {
+      try {
+        setContracts(Array.isArray(cs) ? cs : []);
         const invs = {};
+        for (const inv of (Array.isArray(invList) ? invList : [])) {
+          (invs[inv.contract_id] = invs[inv.contract_id] || []).push(inv);
+        }
         const prs = {};
-        for (const c of cs) {
-          const list = await fetch(`/api/contracts/${c.id}/invoices`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()).catch(() => []);
-          invs[c.id] = list;
-          for (const inv of list) {
-            const reqs = await fetch(`/api/invoices/${inv.id}/payment-requests`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()).catch(() => []);
-            prs[inv.id] = reqs;
-          }
+        for (const req of (Array.isArray(prList) ? prList : [])) {
+          (prs[req.invoice_id] = prs[req.invoice_id] || []).push(req);
         }
         setInvoices(invs);
         setPaymentRequests(prs);
@@ -66,6 +70,10 @@ export default function Payment() {
         setArLines(Array.isArray(lines) ? lines : []);
         setArSheet('');
         setLoading(false);
+      } catch (e) {
+        toast.error('Lỗi tải payment: ' + e.message);
+        setLoading(false);
+      }
       });
   }, [selectedProject]);
 

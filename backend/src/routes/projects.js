@@ -220,13 +220,16 @@ router.patch('/:id/construction-schedule/:itemId', async (req, res) => {
 router.get('/:id/shop-drawings', async (req, res) => {
   const db = getDb();
   const { status, search } = req.query;
-  const where = ['project_id = $1'];
+  const where = ['sd.project_id = $1'];
   const params = [req.params.id];
   let i = 2;
-  if (status) { where.push(`status = $${i++}`); params.push(status); }
-  if (search) { where.push(`(drawing_code ILIKE $${i} OR name_vi ILIKE $${i} OR name_en ILIKE $${i})`); params.push(`%${search}%`); i++; }
+  if (status) { where.push(`sd.status = $${i++}`); params.push(status); }
+  if (search) { where.push(`(sd.drawing_code ILIKE $${i} OR sd.name_vi ILIKE $${i} OR sd.name_en ILIKE $${i})`); params.push(`%${search}%`); i++; }
   params.push(Math.min(parseInt(req.query.limit) || 200, 500));
-  res.json(await db.prepare(`SELECT * FROM shop_drawings WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT $${i}`).allAsync(...params));
+  // zone_code joined (same as GET /shop-drawings/:id) — the table itself has no zone_code column.
+  res.json(await db.prepare(
+    `SELECT sd.*, z.code AS zone_code FROM shop_drawings sd LEFT JOIN zones z ON z.id = sd.zone_id WHERE ${where.join(' AND ')} ORDER BY sd.id DESC LIMIT $${i}`
+  ).allAsync(...params));
 });
 
 router.get('/:id/material-breakdown', async (req, res) => {

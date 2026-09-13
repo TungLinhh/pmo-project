@@ -98,10 +98,21 @@ router.get('/invoices/:id/payment-requests', async (req, res) => {
   res.json(await db.prepare('SELECT * FROM payment_requests WHERE invoice_id = ? ORDER BY due_date ASC').allAsync(req.params.id));
 });
 
-// Invoices of one contract (Payment tab loads these per contract).
+// Invoices of one contract (legacy per-contract loader).
 router.get('/contracts/:id/invoices', async (req, res) => {
   const db = getDb();
   res.json(await db.prepare('SELECT * FROM invoices WHERE contract_id = ? ORDER BY invoice_date ASC').allAsync(req.params.id));
+});
+
+// All invoices of a project in ONE query (Payment tab bulk load — replaces N+1 fan-out).
+router.get('/projects/:id/invoices', async (req, res) => {
+  const db = getDb();
+  const params = [req.params.id, Math.min(parseInt(req.query.limit) || 500, 1000)];
+  res.json(await db.prepare(
+    `SELECT i.*, c.contract_no FROM invoices i
+     JOIN contracts c ON c.id = i.contract_id
+     WHERE c.project_id = $1 ORDER BY i.invoice_date ASC LIMIT $2`
+  ).allAsync(...params));
 });
 
 // Project-scoped payment-request queue (joins the contract→invoice chain)

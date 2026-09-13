@@ -1,5 +1,5 @@
 // Shopdrawing List (mục 6.2)
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { projects, shop as shopApi, exportApi, preferDemoProject } from '../api/index.js';
 import { getToken } from '../api/index.js';
@@ -12,6 +12,7 @@ export default function ShopList() {
   const [allProjects, setAllProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(projectId);
   const [search, setSearch] = useState('');
+  const [zone, setZone] = useState('');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -22,13 +23,29 @@ export default function ShopList() {
     });
   }, []);
 
+  // One fetch per project; filter in memory (like Materials) — no request-per-keystroke race.
+  // Stale-response guard: a slow earlier project must never overwrite the current one.
   useEffect(() => {
     if (!selectedProject) return;
+    let live = true;
     setLoading(true);
-    shopApi.drawings(selectedProject, { search: search || undefined })
-      .then(setItems)
-      .finally(() => setLoading(false));
-  }, [selectedProject, search]);
+    setSearch('');
+    setZone('');
+    shopApi.drawings(selectedProject)
+      .then(rows => { if (live) setItems(Array.isArray(rows) ? rows : []); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [selectedProject]);
+
+  // AND logic: zone + search (code/name/zone/state), like Progress combines its filters.
+  const zones = useMemo(() => Array.from(new Set(items.map(i => i.zone_code).filter(Boolean))).sort(), [items]);
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return items.filter(i =>
+      (!zone || i.zone_code === zone) &&
+      (!q || [i.drawing_code, i.name_vi, i.name_en, i.zone_code, stateOf(i).label]
+        .some(v => (v || '').toLowerCase().includes(q))));
+  }, [items, search, zone]);
 
   // Display state derived from the canonical status + level responses.
   function stateOf(item) {
@@ -38,12 +55,13 @@ export default function ShopList() {
     return { code: 'PENDING', label: 'PENDING' };
   }
 
-  const total = items.length;
-  const approved = items.filter(i => i.approval_date).length;
-  const inReview = items.filter(i => !i.approval_date && i.bql_l1_response && i.bql_l1_response !== 'R').length;
-  const inRevision = items.filter(i => !i.approval_date && i.bql_l1_response === 'R').length;
+  // Stats follow the filtered rows (per user decision).
+  const total = filtered.length;
+  const approved = filtered.filter(i => i.approval_date).length;
+  const inReview = filtered.filter(i => !i.approval_date && i.bql_l1_response && i.bql_l1_response !== 'R').length;
+  const inRevision = filtered.filter(i => !i.approval_date && i.bql_l1_response === 'R').length;
   const pending = total - approved - inReview - inRevision;
-  const overdue = items.filter(i => !i.approval_date && i.planned_submit_date && new Date(i.planned_submit_date) < new Date()).length;
+  const overdue = filtered.filter(i => !i.approval_date && i.planned_submit_date && new Date(i.planned_submit_date) < new Date()).length;
   const approvalPct = total > 0 ? Math.round(approved / total * 100) : 0;
 
   return (
@@ -68,6 +86,11 @@ export default function ShopList() {
       <div className="filter-bar">
         <label>Project</label>
         <ProjectPicker value={selectedProject} onChange={setSelectedProject} placeholder="Chọn dự án..." />
+        <label>Zone</label>
+        <select value={zone} onChange={e => setZone(e.target.value)}>
+          <option value="">All</option>
+          {zones.map(z => <option key={z} value={z}>{z}</option>)}
+        </select>
         <input placeholder="Search code / name..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
       </div>
 
@@ -99,14 +122,14 @@ export default function ShopList() {
             </thead>
             <tbody>
               {loading ? <tr><td colSpan="9" className="empty">Loading...</td></tr> :
-               items.length === 0 ? <tr><td colSpan="9" className="empty">Chưa có data. Upload file Shop [zone].xlsx</td></tr> :
-               items.slice(0, 300).map(item => {
-                 const s = stateOf(item);
-                 const isOverdue = !item.approval_date && item.planned_submit_date && new Date(item.planned_submit_date) < new Date();
-                 const rowCls = isOverdue ? 'critical' : '';
-                 return (
-                   <tr key={item.id} className={rowCls}>
-                     <td><code>{item.zone_code}</code></td>
+               filtered.length === 0 ? <tr><td colSpan="9" className="empty">Chưa có data. Upload file Shop [zone].xlsx</td></tr> :
+               filtered.slice(0, 300).map(item => {
+                  const s = stateOf(item);
+                  // Rows stay neutral (like Progress at a glance): status lives in the badge only.
+                  const isOverdue = !item.approval_date && item.planned_submit_date && new Date(item.planned_submit_date) < new Date();
+                  return (
+                    <tr key={item.id}>
+                      <td><code>{item.zone_code || '—'}</code></td>
                      <td><code>{item.drawing_code}</code></td>
                      <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name_vi || '—'}</td>
                      <td><span className={`badge workflow-${s.code}`}>{s.label}</span></td>

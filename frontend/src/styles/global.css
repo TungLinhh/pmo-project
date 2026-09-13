@@ -9,6 +9,7 @@
   --c-bg: #f5f6f8;
   --c-surface: #ffffff;
   --c-surface-2: #fafbfc;
+  --c-surface-3: #eef1f5;      /* hover state */
   --c-border: #e5e7eb;
   --c-border-strong: #d1d5db;
 
@@ -102,7 +103,11 @@ h1, h2, h3, h4 { font-weight: 600; color: var(--c-text); }
 .badge.workflow-PENDING { background: var(--c-pending-bg); color: var(--c-pending); }
 .badge.workflow-SUBMITTED { background: var(--c-submitted-bg); color: var(--c-submitted); }
 .badge.workflow-REVIEW { background: var(--c-review-bg); color: var(--c-review); }
+.badge.workflow-REVISION { background: var(--c-watch-bg); color: var(--c-watch); }
+.badge.workflow-IN_PROGRESS { background: var(--c-submitted-bg); color: var(--c-submitted); }
 .badge.workflow-APPROVED { background: var(--c-approved-bg); color: var(--c-approved); }
+.badge.workflow-DONE { background: var(--c-approved-bg); color: var(--c-approved); }
+.badge.workflow-PAID { background: var(--c-approved-bg); color: var(--c-approved); }
 .badge.workflow-REJECTED { background: var(--c-rejected-bg); color: var(--c-rejected); }
 .badge.workflow-OVERDUE { background: var(--c-overdue-bg); color: var(--c-overdue); font-weight: 600; }
 .badge.workflow-CLOSED { background: var(--c-closed-bg); color: var(--c-closed); }
@@ -426,6 +431,8 @@ body.theme-dark input[type="number"],
 body.theme-dark input[type="date"],
 body.theme-dark input[type="file"],
 body.theme-dark input[type="search"],
+body.theme-dark input[type="text"],
+body.theme-dark input:not([type]),
 body.theme-dark select,
 body.theme-dark textarea {
   background: var(--c-surface-2) !important;

@@ -50,6 +50,19 @@ try {
   const api = readFileSync('frontend/src/api/index.js', 'utf8');
   ok(api.includes('to_status: newStatus'), 'shopApi.transition sends to_status');
   ok(!api.includes('JSON.stringify(data)') && !api.includes('JSON.stringify({ reason })'), 'no pre-stringified bodies');
+
+  // cleanup throwaways (P0-07* live on real project 1)
+  const { execSync: _exec } = await import('node:child_process');
+  const _run = (sql) => _exec(`bash backend/scripts/pg-ctl.sh psql -c "${sql}"`, { encoding: 'utf8', cwd: new URL('../..', import.meta.url).pathname });
+  _run(`DELETE FROM shop_drawings WHERE drawing_code LIKE 'P0-07%';`);
+  const _tmpId = (typeof tmpProj !== 'undefined' && tmpProj.j?.id) || null;
+  if (_tmpId) {
+    _run(`DELETE FROM daily_manpower WHERE daily_report_id IN (SELECT id FROM daily_reports WHERE project_id = ${_tmpId});`);
+    _run(`DELETE FROM daily_reports WHERE project_id = ${_tmpId};`);
+    _run(`DELETE FROM project_members WHERE project_id = ${_tmpId};`);
+    _run(`DELETE FROM projects WHERE id = ${_tmpId};`);
+  }
+  ok(true, 'throwaways cleaned');
 } finally {
   srv.kill('SIGTERM');
   await new Promise(r => setTimeout(r, 1000));
