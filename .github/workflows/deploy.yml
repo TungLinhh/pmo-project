@@ -50,23 +50,8 @@ jobs:
         run: npm run build --workspace=frontend
       - name: Apply migrations
         run: node backend/src/db/init.js
-      - name: Restart service
-        # No production server is provisioned yet: skip SSH unless the repo has
-        # DEPLOY_HOST/USER/KEY secrets. (Empty secrets evaluate to '' here.)
-        if: ${{ secrets.DEPLOY_HOST != '' }}
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          script: |
-            cd /opt/pmo_project
-            git pull origin main
-            # Workspaces repo: single root install (member-level `npm ci`
-            # would replace the whole root node_modules). Full install
-            # because vite (frontend devDep) is needed for the build.
-            npm ci
-            npm run build --workspace=frontend
-            sudo systemctl restart pmo-backend
-            sleep 3
-            curl -fsS http://localhost:3000/api/health
+      # NOTE: no production server is provisioned yet (no DEPLOY_HOST/USER/KEY
+      # secrets), so this workflow currently verifies build + migrations only.
+      # When a server exists, re-add an SSH restart step here. Do NOT gate it
+      # with `if: ${{ secrets... }}` — secrets are not allowed in `if`
+      # conditions (that broke every deploy run with a workflow-file error).
