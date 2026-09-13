@@ -14,12 +14,16 @@ jobs:
       postgres:
         image: postgres:16
         env:
+          # Ephemeral CI database (data discarded): literal dev password like
+          # ci.yml. Do NOT wire secrets.PG_PASSWORD here — the repo has no such
+          # secret and an empty password kills the container (then init.js dies
+          # with ECONNREFUSED, masking the real cause).
           POSTGRES_USER: pmo_user
-          POSTGRES_PASSWORD: ${{ secrets.PG_PASSWORD }}
+          POSTGRES_PASSWORD: pmo_dev_pwd
           POSTGRES_DB: pmo
         ports: ['5432:5432']
     env:
-      DATABASE_URL: postgresql://pmo_user:${{ secrets.PG_PASSWORD }}@127.0.0.1:5432/pmo
+      DATABASE_URL: postgresql://pmo_user:pmo_dev_pwd@127.0.0.1:5432/pmo
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +43,9 @@ jobs:
       - name: Apply migrations
         run: node backend/src/db/init.js
       - name: Restart service
+        # No production server is provisioned yet: skip SSH unless the repo has
+        # DEPLOY_HOST/USER/KEY secrets. (Empty secrets evaluate to '' here.)
+        if: ${{ secrets.DEPLOY_HOST != '' }}
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
