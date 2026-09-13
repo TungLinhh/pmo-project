@@ -148,6 +148,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install deps
+        run: npm ci
       - name: Apply migrations (same ordered init.js as everywhere)
         run: node backend/src/db/init.js
       - name: Run schema audit
