@@ -25,10 +25,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install backend
-        run: cd backend && npm ci --omit=dev
-      - name: Install frontend
-        run: cd frontend && npm ci
+      # Single root install ON PURPOSE: this repo uses npm workspaces, so
+      # `cd backend && npm ci` / `cd frontend && npm ci` each REPLACE the
+      # whole root node_modules with that member's lockfile tree (the second
+      # one wiped `pg` and broke Apply migrations). One root `npm ci` installs
+      # the full tree (backend prod + frontend build tools) from the root lock.
+      - name: Install deps
+        run: npm ci
+      - name: Verify backend deps resolve
+        run: node -e "import('pg').then(() => console.log('pg ok'))"
       - name: Build frontend
         run: cd frontend && npm run build
       - name: Apply migrations
