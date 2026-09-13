@@ -35,7 +35,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: pmo_user
-          POSTGRES_PASSWORD: ${{ env.PG_PASSWORD }}
+          POSTGRES_PASSWORD: pmo_dev_pwd
           POSTGRES_DB: pmo
         ports: ['5433:5432']
         options: >-
@@ -44,17 +44,20 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      # Single source of truth: top-level PG_PASSWORD. Backend resolves PG via
-      # DB_* parts (same path as docker-compose); tests via PGHOST/PGPORT/….
+      # Ephemeral CI database: literals on purpose. `${{ env.* }}` does NOT
+      # reliably resolve inside services.*.env (empty password kills the
+      # postgres container, then everything dies with ECONNREFUSED).
+      # Backend resolves PG via DB_* parts (same path as docker-compose);
+      # tests via PGHOST/PGPORT/….
       DB_HOST: 127.0.0.1
       DB_PORT: '5433'
       DB_USER: pmo_user
-      DB_PASSWORD: ${{ env.PG_PASSWORD }}
+      DB_PASSWORD: pmo_dev_pwd
       DB_NAME: pmo
       PGHOST: 127.0.0.1
       PGPORT: '5433'
       PGUSER: pmo_user
-      PGPASSWORD: ${{ env.PG_PASSWORD }}
+      PGPASSWORD: pmo_dev_pwd
       PGDATABASE: pmo
       BASE_URL: http://localhost:3000
     steps:
@@ -119,7 +122,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: pmo_user
-          POSTGRES_PASSWORD: ${{ env.PG_PASSWORD }}
+          POSTGRES_PASSWORD: pmo_dev_pwd
           POSTGRES_DB: pmo
         ports: ['5433:5432']
         options: >-
@@ -131,12 +134,12 @@ jobs:
       DB_HOST: 127.0.0.1
       DB_PORT: '5433'
       DB_USER: pmo_user
-      DB_PASSWORD: ${{ env.PG_PASSWORD }}
+      DB_PASSWORD: pmo_dev_pwd
       DB_NAME: pmo
       PGHOST: 127.0.0.1
       PGPORT: '5433'
       PGUSER: pmo_user
-      PGPASSWORD: ${{ env.PG_PASSWORD }}
+      PGPASSWORD: pmo_dev_pwd
       PGDATABASE: pmo
     steps:
       - uses: actions/checkout@v4
